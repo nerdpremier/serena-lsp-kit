@@ -46,8 +46,8 @@ CONTROL_PLANE_API_KEY is shared by the three local tunnel processes.
 GITHUB_PERSONAL_ACCESS_TOKEN is injected only into the GitHub MCP tunnel.
 
 Playwright Linux mode:
-  MCP_PLAYWRIGHT_HEADLESS=1   Headless Chromium (default)
-  MCP_PLAYWRIGHT_HEADLESS=0   Show Chromium on the active desktop session
+  MCP_PLAYWRIGHT_HEADLESS=0   Show Chromium on the active desktop session (default)
+  MCP_PLAYWRIGHT_HEADLESS=1   Headless Chromium
   MCP_PLAYWRIGHT_USER=user    Override the Linux desktop/runtime user
 EOF
 }
@@ -160,7 +160,7 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   PLAYWRIGHT_GROUP="$(id -gn "$PLAYWRIGHT_USER")"
   install -d -o "$PLAYWRIGHT_USER" -g "$PLAYWRIGHT_GROUP" -m 0750 "$BASE_DIR/artifacts/playwright"
 
-  case "${MCP_PLAYWRIGHT_HEADLESS:-1}" in
+  case "${MCP_PLAYWRIGHT_HEADLESS:-0}" in
     1|true|TRUE|yes|YES|on|ON) PLAYWRIGHT_HEADLESS=true ;;
     0|false|FALSE|no|NO|off|OFF) PLAYWRIGHT_HEADLESS=false ;;
     *) echo "error: MCP_PLAYWRIGHT_HEADLESS must be 1/0, true/false, yes/no, or on/off" >&2; exit 1 ;;

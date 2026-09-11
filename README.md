@@ -232,10 +232,10 @@ Playwright MCP runs:
 
 Browser state is not kept as a persistent user profile. On Linux, the kit uses its managed Chromium build; the tunnel remains root-owned but the Playwright MCP/browser child is dropped to the invoking `sudo` user (or a dedicated `mcp-playwright` system user when installed directly as root), so Chromium keeps its sandbox enabled. Set `MCP_PLAYWRIGHT_USER` to choose a different existing Linux runtime user. The Linux child also removes `CONTROL_PLANE_API_KEY` from its environment before starting Playwright.
 
-Linux defaults to headless mode. To show the real Chromium window on the active desktop, install/configure with `MCP_PLAYWRIGHT_HEADLESS=0`; the bootstrap detects `DISPLAY`/Wayland, `XAUTHORITY`, `XDG_RUNTIME_DIR`, and the desktop D-Bus address from the selected runtime user's session. These can be overridden with `MCP_PLAYWRIGHT_DISPLAY`, `MCP_PLAYWRIGHT_WAYLAND_DISPLAY`, `MCP_PLAYWRIGHT_XAUTHORITY`, `MCP_PLAYWRIGHT_XDG_RUNTIME_DIR`, and `MCP_PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS`.
+Linux defaults to GUI/headed mode so you can see the real Chromium window while Playwright works. The bootstrap detects `DISPLAY`/Wayland, `XAUTHORITY`, `XDG_RUNTIME_DIR`, and the desktop D-Bus address from the selected runtime user's session. These can be overridden with `MCP_PLAYWRIGHT_DISPLAY`, `MCP_PLAYWRIGHT_WAYLAND_DISPLAY`, `MCP_PLAYWRIGHT_XAUTHORITY`, `MCP_PLAYWRIGHT_XDG_RUNTIME_DIR`, and `MCP_PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS`. For servers/CI or lower resource usage, explicitly enable headless mode:
 
 ```bash
-sudo MCP_PLAYWRIGHT_HEADLESS=0 ./bootstrap.sh /absolute/path/to/project
+sudo MCP_PLAYWRIGHT_HEADLESS=1 ./bootstrap.sh /absolute/path/to/project
 ```
 
 On Windows, the kit uses Google Chrome Stable rather than the managed Chromium build. It reuses Chrome if already installed and installs Chrome automatically when missing. Playwright MCP output remains under the kit runtime directory.
