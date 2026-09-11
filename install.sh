@@ -10,8 +10,8 @@ usage() {
   cat <<'EOF'
 Usage: sudo ./install.sh /absolute/path/to/project [--restart] [--skip-tunnel-update]
 
-Installs the Serena 1.7.0 LSP-only hardening kit. The installer creates backups,
-never prints credentials, and does not restart the tunnel unless --restart is set.
+Hardens an existing Serena 1.7.0 + tunnel-client installation. For a new
+machine, use bootstrap.sh instead.
 EOF
 }
 
@@ -36,6 +36,7 @@ PROJECT_PATH="$(cd "$PROJECT_PATH" && pwd -P)"
 
 SERENA_BIN="${SERENA_BIN:-$(command -v serena || true)}"
 [[ -n "$SERENA_BIN" && -x "$SERENA_BIN" ]] || { echo "error: serena executable not found" >&2; exit 1; }
+SERENA_BIN="$(readlink -f "$SERENA_BIN")"
 
 if [[ -z "${SERENA_PYTHON:-}" ]]; then
   first_line="$(head -n 1 "$SERENA_BIN")"
@@ -89,7 +90,8 @@ fi
 "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/configure_runtime.py" serena-global "$SERENA_CONFIG"
 "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/configure_runtime.py" project-local "$PROJECT_PATH/.serena/project.local.yml"
 "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/configure_runtime.py" \
-  tunnel-profile "$TUNNEL_PROFILE" "$PROJECT_PATH" --health-port "$SERENA_HEALTH_PORT"
+  tunnel-profile "$TUNNEL_PROFILE" "$PROJECT_PATH" \
+  --health-port "$SERENA_HEALTH_PORT" --serena-bin "$SERENA_BIN"
 "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/configure_runtime.py" \
   systemd-secret "$SYSTEMD_UNIT" "$TUNNEL_ENV"
 "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/patch_serena.py" "$PACKAGE_ROOT"

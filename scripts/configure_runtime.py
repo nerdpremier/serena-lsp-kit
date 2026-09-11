@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
@@ -49,6 +50,11 @@ def _replace_scalar(text: str, key: str, value: str) -> str:
     return text + suffix + replacement + "\n"
 
 
+def _validate_tunnel_id(tunnel_id: str) -> None:
+    if not re.fullmatch(r"tunnel_[A-Za-z0-9_-]+", tunnel_id):
+        raise ValueError("tunnel id must look like tunnel_...")
+
+
 def configure_serena_global(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     text = _replace_scalar(text, "language_backend", "LSP")
@@ -72,13 +78,21 @@ def configure_project_local(path: Path) -> bool:
     return True
 
 
-def configure_tunnel_profile(path: Path, project_path: Path, health_port: int) -> None:
-    text = path.read_text(encoding="utf-8")
-    quoted_project = shlex.quote(str(project_path.resolve()))
-    command = (
-        "serena start-mcp-server --context chatgpt --language-backend LSP "
-        f"--project {quoted_project}"
+def _serena_command(project_path: Path, serena_bin: str) -> str:
+    return (
+        f"{shlex.quote(serena_bin)} start-mcp-server --context chatgpt "
+        f"--language-backend LSP --project {shlex.quote(str(project_path.resolve()))}"
     )
+
+
+def configure_tunnel_profile(
+    path: Path,
+    project_path: Path,
+    health_port: int,
+    serena_bin: str = "serena",
+) -> None:
+    text = path.read_text(encoding="utf-8")
+    command = _serena_command(project_path, serena_bin)
 
     listen_pattern = re.compile(r'(?m)^(\s*listen_addr:\s*)["\']?[^\n"\']+["\']?\s*$')
     if not listen_pattern.search(text):
@@ -92,8 +106,68 @@ def configure_tunnel_profile(path: Path, project_path: Path, health_port: int) -
         command_pattern = re.compile(r'(?m)^(\s*command:\s*)["\'].*serena start-mcp-server.*["\']\s*$')
     if not command_pattern.search(text):
         raise RuntimeError("Could not find Serena MCP command in tunnel profile")
-    text = command_pattern.sub(lambda m: f'{m.group(1)}"{command}"', text, count=1)
+    text = command_pattern.sub(lambda m: f"{m.group(1)}{json.dumps(command)}", text, count=1)
     _atomic_write(path, text, 0o600)
+
+
+def create_fresh_runtime(
+    profile_path: Path,
+    env_path: Path,
+    unit_path: Path,
+    project_path: Path,
+    tunnel_id: str,
+    control_plane_api_key: str,
+    tunnel_dir: Path,
+    serena_bin: str,
+    health_port: int,
+) -> None:
+    """Create a fresh tunnel profile, root-only secret file, and systemd unit."""
+
+    _validate_tunnel_id(tunnel_id)
+    if not control_plane_api_key or "\n" in control_plane_api_key or "\r" in control_plane_api_key:
+        raise ValueError("CONTROL_PLANE_API_KEY must be a single non-empty line")
+
+    command = _serena_command(project_path, serena_bin)
+    profile = f'''config_version: 1
+control_plane:
+  base_url: "https://api.openai.com"
+  tunnel_id: {json.dumps(tunnel_id)}
+  api_key: "env:CONTROL_PLANE_API_KEY"
+health:
+  listen_addr: "127.0.0.1:{health_port}"
+admin_ui:
+  open_browser: false
+log:
+  level: info
+  format: json
+mcp:
+  commands:
+    - channel: main
+      command: {json.dumps(command)}
+'''
+    _atomic_write(profile_path, profile, 0o600)
+    _atomic_write(env_path, f"CONTROL_PLANE_API_KEY={control_plane_api_key}\n", 0o600)
+
+    tunnel_client = (tunnel_dir / "tunnel-client").resolve()
+    unit = f'''[Unit]
+Description=Serena MCP Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={tunnel_dir.resolve()}
+Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+EnvironmentFile={env_path.resolve()}
+ExecStart={tunnel_client} run --profile chatgpt-mcp
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+'''
+    _atomic_write(unit_path, unit, 0o600)
 
 
 def migrate_systemd_secret(unit_path: Path, env_path: Path) -> bool:
@@ -138,10 +212,21 @@ def main() -> int:
     p_tunnel.add_argument("path", type=Path)
     p_tunnel.add_argument("project", type=Path)
     p_tunnel.add_argument("--health-port", type=int, default=18090)
+    p_tunnel.add_argument("--serena-bin", default="serena")
 
     p_unit = sub.add_parser("systemd-secret")
     p_unit.add_argument("unit", type=Path)
     p_unit.add_argument("env", type=Path)
+
+    p_fresh = sub.add_parser("fresh-runtime")
+    p_fresh.add_argument("profile", type=Path)
+    p_fresh.add_argument("env", type=Path)
+    p_fresh.add_argument("unit", type=Path)
+    p_fresh.add_argument("project", type=Path)
+    p_fresh.add_argument("tunnel_id")
+    p_fresh.add_argument("--tunnel-dir", type=Path, required=True)
+    p_fresh.add_argument("--serena-bin", required=True)
+    p_fresh.add_argument("--health-port", type=int, default=18090)
 
     args = parser.parse_args()
     if args.cmd == "serena-global":
@@ -151,8 +236,27 @@ def main() -> int:
         changed = configure_project_local(args.path)
         print(f"project_local_changed={str(changed).lower()}")
     elif args.cmd == "tunnel-profile":
-        configure_tunnel_profile(args.path, args.project, args.health_port)
+        configure_tunnel_profile(
+            args.path,
+            args.project,
+            args.health_port,
+            serena_bin=args.serena_bin,
+        )
         print("tunnel_profile=PASS")
+    elif args.cmd == "fresh-runtime":
+        key = os.environ.get("CONTROL_PLANE_API_KEY", "")
+        create_fresh_runtime(
+            args.profile,
+            args.env,
+            args.unit,
+            args.project,
+            args.tunnel_id,
+            key,
+            args.tunnel_dir,
+            args.serena_bin,
+            args.health_port,
+        )
+        print("fresh_runtime=PASS")
     else:
         migrated = migrate_systemd_secret(args.unit, args.env)
         print(f"systemd_secret_migrated={str(migrated).lower()}")
