@@ -160,7 +160,7 @@ Check all three:
 & 'C:\ProgramData\McpTunnelKit\scripts\Mcp-Stack-Status.ps1'
 ```
 
-The Windows installer removes the old single-task `McpTunnelKit` layout when upgrading.
+The Windows installer removes the old single-task `McpTunnelKit` layout when upgrading. For Playwright, it uses an existing Google Chrome Stable installation when available. If Chrome is missing, it installs `Google.Chrome` with `winget`; on x64 systems without `winget`, it falls back to Google's official Stable MSI after validating its Authenticode signature. ARM64 automatic installation requires `winget`.
 
 ## Optional connectors
 
@@ -227,10 +227,12 @@ Playwright MCP runs:
 ```text
 --headless
 --isolated
---executable-path <kit-managed Chromium>
+--executable-path <browser executable>
 ```
 
-Browser state is not kept as a persistent user profile. Playwright browser files and MCP output stay under the kit runtime directory. On Linux, the tunnel remains root-owned but the Playwright MCP/browser child is dropped to the invoking `sudo` user (or a dedicated `mcp-playwright` system user when installed directly as root), so Chromium keeps its sandbox enabled. Set `MCP_PLAYWRIGHT_USER` to choose a different existing Linux runtime user. The Linux child also removes `CONTROL_PLANE_API_KEY` from its environment before starting Playwright.
+Browser state is not kept as a persistent user profile. On Linux, the kit uses its managed Chromium build; the tunnel remains root-owned but the Playwright MCP/browser child is dropped to the invoking `sudo` user (or a dedicated `mcp-playwright` system user when installed directly as root), so Chromium keeps its sandbox enabled. Set `MCP_PLAYWRIGHT_USER` to choose a different existing Linux runtime user. The Linux child also removes `CONTROL_PLANE_API_KEY` from its environment before starting Playwright.
+
+On Windows, the kit uses Google Chrome Stable rather than the managed Chromium build. It reuses Chrome if already installed and installs Chrome automatically when missing. Playwright MCP output remains under the kit runtime directory.
 
 ## Secret handling
 

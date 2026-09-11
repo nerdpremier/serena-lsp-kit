@@ -78,6 +78,59 @@ function Download-VerifiedZip([string]$Url, [string]$ChecksumUrl, [string]$Asset
     }
 }
 
+function Get-GoogleChromePath {
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe") }
+    $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($programFilesX86) { $candidates += (Join-Path $programFilesX86 "Google\Chrome\Application\chrome.exe") }
+    if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA "Google\Chrome\Application\chrome.exe") }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return (Resolve-Path -LiteralPath $candidate).Path }
+    }
+    return $null
+}
+
+function Install-GoogleChromeStable {
+    $existing = Get-GoogleChromePath
+    if ($existing) { return $existing }
+
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "Google Chrome was not found. Installing Google Chrome Stable with winget..."
+        & $winget.Source install --id Google.Chrome --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+        $installed = Get-GoogleChromePath
+        if ($installed) { return $installed }
+        Write-Warning "winget did not produce a detectable Google Chrome installation; trying the official Google MSI fallback."
+    }
+
+    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+        throw "Google Chrome is required for Playwright. Automatic ARM64 installation requires winget; install App Installer/winget or Google Chrome Stable, then rerun bootstrap.ps1."
+    }
+
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("mcp-kit-chrome-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    try {
+        $msi = Join-Path $tmp "GoogleChromeStandaloneEnterprise64.msi"
+        $url = "https://dl.google.com/chrome/install/googlechromestandaloneenterprise64.msi"
+        Write-Host "Downloading the official Google Chrome Stable MSI..."
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $msi
+        $signature = Get-AuthenticodeSignature -LiteralPath $msi
+        if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+            -not $signature.SignerCertificate -or
+            $signature.SignerCertificate.Subject -notmatch '(^|,\s*)(CN|O)=Google LLC(,|$)') {
+            throw "Google Chrome MSI Authenticode validation failed."
+        }
+        $process = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+        if ($process.ExitCode -notin @(0, 3010)) { throw "Google Chrome MSI installation failed with exit code $($process.ExitCode)." }
+    } finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+
+    $installed = Get-GoogleChromePath
+    if (-not $installed) { throw "Google Chrome installation completed but chrome.exe was not found." }
+    return $installed
+}
+
 function Protect-File([string]$Path) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $acl = New-Object Security.AccessControl.FileSecurity
@@ -178,13 +231,8 @@ if (-not $SkipPlaywright) {
     & $Npm install --prefix $PlaywrightDir --omit=dev --no-audit --no-fund "@playwright/mcp@$PlaywrightMcpVersion"
     if ($LASTEXITCODE -ne 0) { throw "Playwright MCP npm install failed" }
     $PlaywrightCli = Join-Path $PlaywrightDir "node_modules\@playwright\mcp\cli.js"
-    $PlaywrightCoreCli = Join-Path $PlaywrightDir "node_modules\playwright\cli.js"
-    $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
-    & $NodeExe $PlaywrightCoreCli install chromium
-    if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium install failed" }
-    $PlaywrightBrowser = Get-ChildItem -LiteralPath $BrowsersDir -Recurse -File -Filter "chrome.exe" |
-        Where-Object { $_.FullName -match '[\\/]chromium-[^\\/]+[\\/]' } | Select-Object -First 1
-    if (-not $PlaywrightBrowser) { throw "Installed Playwright Chromium executable not found" }
+    $PlaywrightBrowser = Install-GoogleChromeStable
+    Write-Host "playwright_browser=$PlaywrightBrowser"
 }
 
 $env:CONTROL_PLANE_API_KEY = $ControlKey
@@ -202,7 +250,7 @@ if (-not $SkipGitHub) {
 if (-not $SkipPlaywright) {
     $PlaywrightProfile = Join-Path $ConfigDir "playwright.yaml"
     $PlaywrightEnv = Join-Path $ConfigDir "playwright.env"
-    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") playwright $PlaywrightProfile $PlaywrightEnv $PlaywrightTunnelId --health-port 18092 --node-bin $NodeExe --playwright-cli $PlaywrightCli --output-dir (Join-Path $BaseDir "artifacts\playwright") --browsers-path $BrowsersDir --browser-executable $PlaywrightBrowser.FullName
+    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") playwright $PlaywrightProfile $PlaywrightEnv $PlaywrightTunnelId --health-port 18092 --node-bin $NodeExe --playwright-cli $PlaywrightCli --output-dir (Join-Path $BaseDir "artifacts\playwright") --browsers-path $BrowsersDir --browser-executable $PlaywrightBrowser
 }
 
 Get-ChildItem -LiteralPath $ConfigDir -File | Where-Object { $_.Extension -in @('.yaml', '.env') } | ForEach-Object { Protect-File $_.FullName }

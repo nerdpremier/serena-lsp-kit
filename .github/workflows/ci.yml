@@ -55,9 +55,26 @@ jobs:
               exit 1
             }
           }
+      - name: Check Windows Chrome bootstrap contract
+        shell: pwsh
+        run: |
+          $bootstrap = Get-Content bootstrap.ps1 -Raw
+          $required = @(
+            'Get-GoogleChromePath',
+            'Install-GoogleChromeStable',
+            'winget.exe',
+            'Google.Chrome',
+            'googlechromestandaloneenterprise64.msi',
+            'Get-AuthenticodeSignature',
+            '--browser-executable $PlaywrightBrowser'
+          )
+          foreach ($needle in $required) {
+            if (-not $bootstrap.Contains($needle)) { throw "Missing Windows Chrome bootstrap contract: $needle" }
+          }
       - name: Check pinned upstream assets
         shell: pwsh
         run: |
           Invoke-WebRequest -Method Head -Uri https://github.com/openai/tunnel-client/releases/download/v0.0.14/tunnel-client-v0.0.14-windows-amd64.zip | Out-Null
           Invoke-WebRequest -Method Head -Uri https://github.com/github/github-mcp-server/releases/download/v1.12.1/github-mcp-server_Windows_x86_64.zip | Out-Null
           Invoke-WebRequest -Method Head -Uri https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip | Out-Null
+          Invoke-WebRequest -Method Head -Uri https://dl.google.com/chrome/install/googlechromestandaloneenterprise64.msi | Out-Null
