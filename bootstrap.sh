@@ -44,6 +44,11 @@ Options:
 
 CONTROL_PLANE_API_KEY is shared by the three local tunnel processes.
 GITHUB_PERSONAL_ACCESS_TOKEN is injected only into the GitHub MCP tunnel.
+
+Playwright Linux mode:
+  MCP_PLAYWRIGHT_HEADLESS=1   Headless Chromium (default)
+  MCP_PLAYWRIGHT_HEADLESS=0   Show Chromium on the active desktop session
+  MCP_PLAYWRIGHT_USER=user    Override the Linux desktop/runtime user
 EOF
 }
 
@@ -133,6 +138,7 @@ PLAYWRIGHT_CLI=""
 PLAYWRIGHT_BROWSERS=""
 PLAYWRIGHT_BROWSER=""
 PLAYWRIGHT_USER=""
+PLAYWRIGHT_GUI_ARGS=()
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   command -v runuser >/dev/null 2>&1 || { echo "error: missing required command: runuser" >&2; exit 1; }
   PLAYWRIGHT_USER="${MCP_PLAYWRIGHT_USER:-${SUDO_USER:-}}"
@@ -153,6 +159,57 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   chmod 0755 "$BASE_DIR"
   PLAYWRIGHT_GROUP="$(id -gn "$PLAYWRIGHT_USER")"
   install -d -o "$PLAYWRIGHT_USER" -g "$PLAYWRIGHT_GROUP" -m 0750 "$BASE_DIR/artifacts/playwright"
+
+  case "${MCP_PLAYWRIGHT_HEADLESS:-1}" in
+    1|true|TRUE|yes|YES|on|ON) PLAYWRIGHT_HEADLESS=true ;;
+    0|false|FALSE|no|NO|off|OFF) PLAYWRIGHT_HEADLESS=false ;;
+    *) echo "error: MCP_PLAYWRIGHT_HEADLESS must be 1/0, true/false, yes/no, or on/off" >&2; exit 1 ;;
+  esac
+
+  if [[ "$PLAYWRIGHT_HEADLESS" == false ]]; then
+    command -v pgrep >/dev/null 2>&1 || { echo "error: pgrep is required for Playwright GUI mode" >&2; exit 1; }
+
+    desktop_env_value() {
+      local key="$1" pid value
+      while read -r pid; do
+        [[ -n "$pid" && -r "/proc/$pid/environ" ]] || continue
+        value="$(tr '\0' '\n' <"/proc/$pid/environ" | sed -n "s/^${key}=//p" | head -n 1)"
+        if [[ -n "$value" ]]; then
+          printf '%s' "$value"
+          return 0
+        fi
+      done < <(pgrep -u "$PLAYWRIGHT_USER" -f 'xfce4-session|gnome-session|plasmashell|ksmserver|Xorg|Xwayland' 2>/dev/null || true)
+      return 1
+    }
+
+    PLAYWRIGHT_DISPLAY="${MCP_PLAYWRIGHT_DISPLAY:-$(desktop_env_value DISPLAY || true)}"
+    PLAYWRIGHT_WAYLAND_DISPLAY="${MCP_PLAYWRIGHT_WAYLAND_DISPLAY:-$(desktop_env_value WAYLAND_DISPLAY || true)}"
+    PLAYWRIGHT_XAUTHORITY="${MCP_PLAYWRIGHT_XAUTHORITY:-$(desktop_env_value XAUTHORITY || true)}"
+    PLAYWRIGHT_XDG_RUNTIME_DIR="${MCP_PLAYWRIGHT_XDG_RUNTIME_DIR:-$(desktop_env_value XDG_RUNTIME_DIR || true)}"
+    PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS="${MCP_PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS:-$(desktop_env_value DBUS_SESSION_BUS_ADDRESS || true)}"
+
+    PLAYWRIGHT_UID="$(id -u "$PLAYWRIGHT_USER")"
+    [[ -n "$PLAYWRIGHT_XDG_RUNTIME_DIR" ]] || PLAYWRIGHT_XDG_RUNTIME_DIR="/run/user/$PLAYWRIGHT_UID"
+    if [[ -z "$PLAYWRIGHT_XAUTHORITY" ]]; then
+      PLAYWRIGHT_HOME="$(getent passwd "$PLAYWRIGHT_USER" | cut -d: -f6)"
+      [[ -f "$PLAYWRIGHT_HOME/.Xauthority" ]] && PLAYWRIGHT_XAUTHORITY="$PLAYWRIGHT_HOME/.Xauthority"
+    fi
+    if [[ -z "$PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS" && -S "$PLAYWRIGHT_XDG_RUNTIME_DIR/bus" ]]; then
+      PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS="unix:path=$PLAYWRIGHT_XDG_RUNTIME_DIR/bus"
+    fi
+    if [[ -z "$PLAYWRIGHT_DISPLAY" && -z "$PLAYWRIGHT_WAYLAND_DISPLAY" ]]; then
+      echo "error: Playwright GUI mode could not find an active desktop session for $PLAYWRIGHT_USER" >&2
+      echo "hint: set MCP_PLAYWRIGHT_DISPLAY or MCP_PLAYWRIGHT_WAYLAND_DISPLAY explicitly" >&2
+      exit 1
+    fi
+
+    PLAYWRIGHT_GUI_ARGS=(--headed)
+    [[ -n "$PLAYWRIGHT_DISPLAY" ]] && PLAYWRIGHT_GUI_ARGS+=(--display "$PLAYWRIGHT_DISPLAY")
+    [[ -n "$PLAYWRIGHT_WAYLAND_DISPLAY" ]] && PLAYWRIGHT_GUI_ARGS+=(--wayland-display "$PLAYWRIGHT_WAYLAND_DISPLAY")
+    [[ -n "$PLAYWRIGHT_XAUTHORITY" ]] && PLAYWRIGHT_GUI_ARGS+=(--xauthority "$PLAYWRIGHT_XAUTHORITY")
+    [[ -n "$PLAYWRIGHT_XDG_RUNTIME_DIR" ]] && PLAYWRIGHT_GUI_ARGS+=(--xdg-runtime-dir "$PLAYWRIGHT_XDG_RUNTIME_DIR")
+    [[ -n "$PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS" ]] && PLAYWRIGHT_GUI_ARGS+=(--dbus-session-bus-address "$PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS")
+  fi
 fi
 
 CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" \
@@ -170,7 +227,8 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
     playwright "$PLAYWRIGHT_PROFILE" "$PLAYWRIGHT_ENV" "$PLAYWRIGHT_TUNNEL_ID" --health-port 18092 \
     --node-bin "$NODE_BIN" --playwright-cli "$PLAYWRIGHT_CLI" \
     --output-dir "$BASE_DIR/artifacts/playwright" --browsers-path "$PLAYWRIGHT_BROWSERS" \
-    --browser-executable "$PLAYWRIGHT_BROWSER" --run-as-user "$PLAYWRIGHT_USER"
+    --browser-executable "$PLAYWRIGHT_BROWSER" --run-as-user "$PLAYWRIGHT_USER" \
+    "${PLAYWRIGHT_GUI_ARGS[@]}"
 fi
 chmod 0600 "$PROFILE_DIR"/*.yaml "$ENV_DIR"/*.env
 

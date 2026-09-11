@@ -81,8 +81,13 @@ def playwright_command(
     *,
     run_as_user: str = "",
     browsers_path: str = "",
+    headless: bool = True,
+    desktop_env: dict[str, str] | None = None,
 ) -> str:
-    args = [node_bin, playwright_cli, "--headless", "--isolated"]
+    args = [node_bin, playwright_cli]
+    if headless:
+        args.append("--headless")
+    args.append("--isolated")
     if executable_path:
         args.extend(["--executable-path", executable_path])
     args.extend(["--output-dir", str(output_dir.resolve())])
@@ -98,6 +103,16 @@ def playwright_command(
         ]
         if browsers_path:
             prefix.append(f"PLAYWRIGHT_BROWSERS_PATH={browsers_path}")
+        for key in (
+            "DISPLAY",
+            "WAYLAND_DISPLAY",
+            "XAUTHORITY",
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+        ):
+            value = (desktop_env or {}).get(key, "")
+            if value:
+                prefix.append(f"{key}={value}")
         args = prefix + args
     return command_line(*args)
 
@@ -186,6 +201,12 @@ def main() -> int:
     p_playwright.add_argument("--browsers-path", required=True)
     p_playwright.add_argument("--browser-executable", required=True)
     p_playwright.add_argument("--run-as-user", default="")
+    p_playwright.add_argument("--headed", action="store_true")
+    p_playwright.add_argument("--display", default="")
+    p_playwright.add_argument("--wayland-display", default="")
+    p_playwright.add_argument("--xauthority", default="")
+    p_playwright.add_argument("--xdg-runtime-dir", default="")
+    p_playwright.add_argument("--dbus-session-bus-address", default="")
 
     args = parser.parse_args()
     if args.kind == "serena":
@@ -202,6 +223,14 @@ def main() -> int:
             args.browser_executable,
             run_as_user=args.run_as_user,
             browsers_path=args.browsers_path,
+            headless=not args.headed,
+            desktop_env={
+                "DISPLAY": args.display,
+                "WAYLAND_DISPLAY": args.wayland_display,
+                "XAUTHORITY": args.xauthority,
+                "XDG_RUNTIME_DIR": args.xdg_runtime_dir,
+                "DBUS_SESSION_BUS_ADDRESS": args.dbus_session_bus_address,
+            },
         )
         browsers_path = args.browsers_path
 

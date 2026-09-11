@@ -107,6 +107,31 @@ class MultiMcpConfigTests(unittest.TestCase):
         self.assertTrue(cmd.startswith("/usr/sbin/runuser -u kali -- /usr/bin/env -u CONTROL_PLANE_API_KEY "))
         self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright", cmd)
         self.assertIn("--executable-path /opt/ms-playwright/chromium-1243/chrome-linux64/chrome", cmd)
+        self.assertIn("--headless", cmd)
+        self.assertNotIn("--no-sandbox", cmd)
+
+    def test_linux_playwright_gui_inherits_desktop_session(self) -> None:
+        cmd = multi.playwright_command(
+            "/opt/node/bin/node",
+            "/opt/playwright/node_modules/@playwright/mcp/cli.js",
+            Path("/opt/artifacts/playwright"),
+            "/opt/ms-playwright/chromium-1243/chrome-linux64/chrome",
+            run_as_user="kali",
+            browsers_path="/opt/ms-playwright",
+            headless=False,
+            desktop_env={
+                "DISPLAY": ":0",
+                "XAUTHORITY": "/home/kali/.Xauthority",
+                "XDG_RUNTIME_DIR": "/run/user/1000",
+                "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+            },
+        )
+        self.assertNotIn("--headless", cmd)
+        self.assertIn("DISPLAY=:0", cmd)
+        self.assertIn("XAUTHORITY=/home/kali/.Xauthority", cmd)
+        self.assertIn("XDG_RUNTIME_DIR=/run/user/1000", cmd)
+        self.assertIn("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", cmd)
+        self.assertNotIn("CONTROL_PLANE_API_KEY=", cmd)
         self.assertNotIn("--no-sandbox", cmd)
 
     def test_windows_paths_are_safe_for_tunnel_parser(self) -> None:
@@ -114,12 +139,12 @@ class MultiMcpConfigTests(unittest.TestCase):
             r"C:\Program Files\nodejs\node.exe",
             r"C:\ProgramData\McpTunnelKit\playwright\cli.js",
             Path(r"C:\ProgramData\McpTunnelKit\artifacts\playwright"),
-            r"C:\ProgramData\McpTunnelKit\ms-playwright\chromium-1243\chrome-win64\chrome.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         )
         self.assertIn("'C:\\Program Files\\nodejs\\node.exe'", cmd)
         self.assertIn("'C:\\ProgramData\\McpTunnelKit\\playwright\\cli.js'", cmd)
         self.assertIn("--executable-path", cmd)
-        self.assertIn("chromium-1243", cmd)
+        self.assertIn("Google", cmd)
         self.assertNotIn("runuser", cmd)
 
     def test_github_requires_token(self) -> None:
