@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate cross-platform tunnel-client profiles for Serena, GitHub and Playwright MCP."""
+"""Generate isolated tunnel-client profiles for Serena, GitHub and Playwright MCP."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 GITHUB_TOOLSETS = "default,actions,code_security"
@@ -32,24 +31,19 @@ def _atomic_write(path: Path, text: str, mode: int | None = None) -> None:
 
 
 def validate_tunnel_id(value: str) -> None:
-    if not re.fullmatch(r"tunnel_[A-Za-z0-9_-]+", value):
+    if not re.fullmatch(r"tunnel_[a-z0-9]{32}", value):
         raise ValueError("tunnel id must look like tunnel_...")
 
 
-def validate_secret(name: str, value: str, *, required: bool = True) -> None:
-    if required and not value:
+def validate_secret(name: str, value: str) -> None:
+    if not value:
         raise ValueError(f"{name} is required")
-    if value and ("\n" in value or "\r" in value):
+    if "\n" in value or "\r" in value:
         raise ValueError(f"{name} must be a single line")
 
 
 def quote_tunnel_arg(value: str) -> str:
-    """Quote one argv item for tunnel-client's OS-independent command parser.
-
-    tunnel-client treats backslash as an escape outside single quotes, so Windows
-    paths must be single-quoted even if they contain no spaces.
-    """
-
+    """Quote one argv item for tunnel-client's OS-independent command parser."""
     if value and re.fullmatch(r"[A-Za-z0-9_./:@%+=,-]+", value):
         return value
     if "'" not in value:
@@ -90,61 +84,37 @@ def playwright_command(node_bin: str, playwright_cli: str, output_dir: Path) -> 
     )
 
 
-@dataclass(frozen=True)
-class RuntimeSpec:
-    project: Path
-    tunnel_id: str
-    serena_bin: str
-    health_port: int = 18090
-    github_bin: str | None = None
-    node_bin: str | None = None
-    playwright_cli: str | None = None
-    playwright_output_dir: Path | None = None
-
-    def commands(self) -> list[tuple[str, str]]:
-        result = [("main", serena_command(self.serena_bin, self.project))]
-        if self.github_bin:
-            result.append(("github", github_command(self.github_bin)))
-        if self.node_bin and self.playwright_cli:
-            output = self.playwright_output_dir or self.project / ".mcp-artifacts" / "playwright"
-            result.append(("playwright", playwright_command(self.node_bin, self.playwright_cli, output)))
-        return result
-
-
-def render_profile(spec: RuntimeSpec) -> str:
-    validate_tunnel_id(spec.tunnel_id)
-    commands = spec.commands()
-    lines = [
-        "config_version: 1",
-        "control_plane:",
-        '  base_url: "https://api.openai.com"',
-        f"  tunnel_id: {json.dumps(spec.tunnel_id)}",
-        '  api_key: "env:CONTROL_PLANE_API_KEY"',
-        "health:",
-        f'  listen_addr: "127.0.0.1:{spec.health_port}"',
-        "admin_ui:",
-        "  open_browser: false",
-        "log:",
-        "  level: info",
-        "  format: json",
-        "mcp:",
-        "  commands:",
-    ]
-    for channel, command in commands:
-        lines.extend(
-            [
-                f"    - channel: {channel}",
-                f"      command: {json.dumps(command)}",
-            ]
-        )
-    return "\n".join(lines) + "\n"
+def render_profile(tunnel_id: str, command: str, health_port: int) -> str:
+    """Render one tunnel/one connector. Every connector is exposed as channel main."""
+    validate_tunnel_id(tunnel_id)
+    return "\n".join(
+        [
+            "config_version: 1",
+            "control_plane:",
+            '  base_url: "https://api.openai.com"',
+            f"  tunnel_id: {json.dumps(tunnel_id)}",
+            '  api_key: "env:CONTROL_PLANE_API_KEY"',
+            "health:",
+            f'  listen_addr: "127.0.0.1:{health_port}"',
+            "admin_ui:",
+            "  open_browser: false",
+            "log:",
+            "  level: info",
+            "  format: json",
+            "mcp:",
+            "  commands:",
+            "    - channel: main",
+            f"      command: {json.dumps(command)}",
+            "",
+        ]
+    )
 
 
-def render_env(control_plane_key: str, github_token: str = "") -> str:
+def render_env(kind: str, control_plane_key: str, *, github_token: str = "", browsers_path: str = "") -> str:
     validate_secret("CONTROL_PLANE_API_KEY", control_plane_key)
-    validate_secret("GITHUB_PERSONAL_ACCESS_TOKEN", github_token, required=False)
     lines = [f"CONTROL_PLANE_API_KEY={control_plane_key}"]
-    if github_token:
+    if kind == "github":
+        validate_secret("GITHUB_PERSONAL_ACCESS_TOKEN", github_token)
         lines.extend(
             [
                 f"GITHUB_PERSONAL_ACCESS_TOKEN={github_token}",
@@ -152,45 +122,74 @@ def render_env(control_plane_key: str, github_token: str = "") -> str:
                 "GITHUB_LOCKDOWN_MODE=1",
             ]
         )
+    elif kind == "playwright" and browsers_path:
+        validate_secret("PLAYWRIGHT_BROWSERS_PATH", browsers_path)
+        lines.append(f"PLAYWRIGHT_BROWSERS_PATH={browsers_path}")
+    elif kind not in {"serena", "playwright"}:
+        raise ValueError(f"unsupported runtime kind: {kind}")
     return "\n".join(lines) + "\n"
 
 
-def create_runtime_files(profile_path: Path, env_path: Path, spec: RuntimeSpec) -> None:
+def create_runtime(profile: Path, env_file: Path, *, kind: str, tunnel_id: str, command: str, health_port: int, browsers_path: str = "") -> None:
     control_key = os.environ.get("CONTROL_PLANE_API_KEY", "")
     github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
-    if spec.github_bin and not github_token:
-        raise ValueError("GITHUB_PERSONAL_ACCESS_TOKEN is required when GitHub MCP is enabled")
-    _atomic_write(profile_path, render_profile(spec), 0o600)
-    _atomic_write(env_path, render_env(control_key, github_token), 0o600)
+    _atomic_write(profile, render_profile(tunnel_id, command, health_port), 0o600)
+    _atomic_write(
+        env_file,
+        render_env(kind, control_key, github_token=github_token, browsers_path=browsers_path),
+        0o600,
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("profile", type=Path)
-    parser.add_argument("env", type=Path)
-    parser.add_argument("project", type=Path)
-    parser.add_argument("tunnel_id")
-    parser.add_argument("--serena-bin", required=True)
-    parser.add_argument("--health-port", type=int, default=18090)
-    parser.add_argument("--github-bin")
-    parser.add_argument("--node-bin")
-    parser.add_argument("--playwright-cli")
-    parser.add_argument("--playwright-output-dir", type=Path)
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Generate one-tunnel-per-MCP profiles")
+    sub = parser.add_subparsers(dest="kind", required=True)
 
-    spec = RuntimeSpec(
-        project=args.project,
+    def common(p: argparse.ArgumentParser) -> None:
+        p.add_argument("profile", type=Path)
+        p.add_argument("env", type=Path)
+        p.add_argument("tunnel_id")
+        p.add_argument("--health-port", type=int, required=True)
+
+    p_serena = sub.add_parser("serena")
+    common(p_serena)
+    p_serena.add_argument("project", type=Path)
+    p_serena.add_argument("--serena-bin", required=True)
+
+    p_github = sub.add_parser("github")
+    common(p_github)
+    p_github.add_argument("--github-bin", required=True)
+
+    p_playwright = sub.add_parser("playwright")
+    common(p_playwright)
+    p_playwright.add_argument("--node-bin", required=True)
+    p_playwright.add_argument("--playwright-cli", required=True)
+    p_playwright.add_argument("--output-dir", type=Path, required=True)
+    p_playwright.add_argument("--browsers-path", required=True)
+
+    args = parser.parse_args()
+    if args.kind == "serena":
+        command = serena_command(args.serena_bin, args.project)
+        browsers_path = ""
+    elif args.kind == "github":
+        command = github_command(args.github_bin)
+        browsers_path = ""
+    else:
+        command = playwright_command(args.node_bin, args.playwright_cli, args.output_dir)
+        browsers_path = args.browsers_path
+
+    create_runtime(
+        args.profile,
+        args.env,
+        kind=args.kind,
         tunnel_id=args.tunnel_id,
-        serena_bin=args.serena_bin,
+        command=command,
         health_port=args.health_port,
-        github_bin=args.github_bin,
-        node_bin=args.node_bin,
-        playwright_cli=args.playwright_cli,
-        playwright_output_dir=args.playwright_output_dir,
+        browsers_path=browsers_path,
     )
-    create_runtime_files(args.profile, args.env, spec)
-    print("multi_mcp_runtime=PASS")
-    print("channels=" + ",".join(channel for channel, _ in spec.commands()))
+    print(f"runtime={args.kind}")
+    print("channel=main")
+    print("profile=PASS")
     return 0
 
 

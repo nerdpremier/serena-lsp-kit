@@ -69,7 +69,7 @@ class ConfigureRuntimeTests(unittest.TestCase):
                 env,
                 unit,
                 project,
-                "tunnel_abc123",
+                "tunnel_ffffffffffffffffffffffffffffffff",
                 secret,
                 tunnel_dir,
                 "/opt/serena/bin/serena",
@@ -78,7 +78,7 @@ class ConfigureRuntimeTests(unittest.TestCase):
 
             profile_text = profile.read_text(encoding="utf-8")
             unit_text = unit.read_text(encoding="utf-8")
-            self.assertIn('tunnel_id: "tunnel_abc123"', profile_text)
+            self.assertIn('tunnel_id: "tunnel_ffffffffffffffffffffffffffffffff"', profile_text)
             self.assertIn('api_key: "env:CONTROL_PLANE_API_KEY"', profile_text)
             self.assertNotIn(secret, profile_text)
             self.assertNotIn(secret, unit_text)

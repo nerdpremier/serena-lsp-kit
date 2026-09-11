@@ -1,50 +1,91 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE="${SERENA_SERVICE:-serena-tunnel.service}"
-ENV_FILE="${TUNNEL_ENV:-/root/.config/tunnel-client/serena-tunnel.env}"
-HEALTH_PORT="${SERENA_HEALTH_PORT:-18090}"
-
 [[ "$(id -u)" -eq 0 ]] || { echo "error: run as root" >&2; exit 1; }
-[[ -f "$ENV_FILE" ]] || { echo "error: missing $ENV_FILE" >&2; exit 1; }
+
+SPLIT_ENV_DIR="${MCP_ENV_DIR:-/root/.config/mcp-tunnel-kit}"
+legacy_env="${TUNNEL_ENV:-/root/.config/tunnel-client/serena-tunnel.env}"
 
 printf 'New CONTROL_PLANE_API_KEY: ' >&2
 IFS= read -r -s new_key
 printf '\n' >&2
 [[ -n "$new_key" ]] || { echo "error: key cannot be empty" >&2; exit 1; }
+[[ "$new_key" != *$'\n'* && "$new_key" != *$'\r'* ]] || { echo "error: key must be one line" >&2; exit 1; }
 
-backup="${ENV_FILE}.rotation-backup"
-cp -a "$ENV_FILE" "$backup"
-chmod 0600 "$backup"
+replace_key() {
+  local file="$1" tmp
+  tmp="$(mktemp "${file}.tmp.XXXXXX")"
+  awk -v key="$new_key" '
+    BEGIN {done=0}
+    /^CONTROL_PLANE_API_KEY=/ && !done {print "CONTROL_PLANE_API_KEY=" key; done=1; next}
+    {print}
+    END {if (!done) print "CONTROL_PLANE_API_KEY=" key}
+  ' "$file" > "$tmp"
+  chmod 0600 "$tmp"
+  mv "$tmp" "$file"
+}
 
-tmp="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
-trap 'rm -f "$tmp"' EXIT
-printf 'CONTROL_PLANE_API_KEY=%s\n' "$new_key" > "$tmp"
-unset new_key
-chmod 0600 "$tmp"
-mv "$tmp" "$ENV_FILE"
-trap - EXIT
+check_endpoint() {
+  local port="$1"
+  local health ready
+  health="$(curl -fsS --max-time 4 "http://127.0.0.1:${port}/healthz" 2>/dev/null || true)"
+  ready="$(curl -fsS --max-time 4 "http://127.0.0.1:${port}/readyz" 2>/dev/null || true)"
+  [[ "$health" == "live" && "$ready" == "ready" ]]
+}
 
-if systemctl restart "$SERVICE"; then
-  sleep 2
-  health="$(curl -fsS --max-time 4 "http://127.0.0.1:${HEALTH_PORT}/healthz" 2>/dev/null || true)"
-  ready="$(curl -fsS --max-time 4 "http://127.0.0.1:${HEALTH_PORT}/readyz" 2>/dev/null || true)"
-else
-  health=""
-  ready=""
+entries=()
+[[ -f "$SPLIT_ENV_DIR/serena.env" ]] && entries+=("serena:$SPLIT_ENV_DIR/serena.env:mcp-serena-tunnel.service:18090")
+[[ -f "$SPLIT_ENV_DIR/github.env" ]] && entries+=("github:$SPLIT_ENV_DIR/github.env:mcp-github-tunnel.service:18091")
+[[ -f "$SPLIT_ENV_DIR/playwright.env" ]] && entries+=("playwright:$SPLIT_ENV_DIR/playwright.env:mcp-playwright-tunnel.service:18092")
+
+if [[ ${#entries[@]} -eq 0 ]]; then
+  [[ -f "$legacy_env" ]] || { echo "error: no MCP tunnel environment files found" >&2; exit 1; }
+  entries+=("serena:$legacy_env:${SERENA_SERVICE:-serena-tunnel.service}:${SERENA_HEALTH_PORT:-18090}")
 fi
 
-if [[ "$health" == "live" && "$ready" == "ready" ]]; then
-  rm -f "$backup"
+backups=()
+for entry in "${entries[@]}"; do
+  IFS=: read -r _name file _service _port <<< "$entry"
+  backup="${file}.rotation-backup"
+  cp -a "$file" "$backup"
+  chmod 0600 "$backup"
+  backups+=("$backup")
+  replace_key "$file"
+done
+unset new_key
+
+failed=0
+for entry in "${entries[@]}"; do
+  IFS=: read -r name _file service port <<< "$entry"
+  if ! systemctl restart "$service"; then
+    echo "error: failed to restart $name tunnel" >&2
+    failed=1
+    continue
+  fi
+  sleep 1
+  if ! check_endpoint "$port"; then
+    echo "error: $name tunnel failed health validation" >&2
+    failed=1
+  fi
+done
+
+if [[ "$failed" -eq 0 ]]; then
+  rm -f "${backups[@]}"
   echo "rotation=PASS"
+  echo "connectors_rotated=${#entries[@]}"
   exit 0
 fi
 
-cp -a "$backup" "$ENV_FILE"
-chmod 0600 "$ENV_FILE"
-rm -f "$backup"
-systemctl restart "$SERVICE" || true
-sleep 2
+for entry in "${entries[@]}"; do
+  IFS=: read -r _name file service _port <<< "$entry"
+  backup="${file}.rotation-backup"
+  if [[ -f "$backup" ]]; then
+    cp -a "$backup" "$file"
+    chmod 0600 "$file"
+    rm -f "$backup"
+  fi
+  systemctl restart "$service" >/dev/null 2>&1 || true
+done
 
-echo "error: new key failed tunnel health validation; previous key restored" >&2
+echo "error: new key failed validation; all previous keys restored" >&2
 exit 1

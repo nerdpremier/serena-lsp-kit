@@ -1,10 +1,13 @@
 param(
-    [string]$BaseDir = "C:\ProgramData\McpTunnelKit"
+    [string]$BaseDir = "C:\ProgramData\McpTunnelKit",
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("serena", "github", "playwright")]
+    [string]$Connector
 )
 
 $ErrorActionPreference = "Stop"
-$envFile = Join-Path $BaseDir "config\secrets.env"
-$profile = Join-Path $BaseDir "config\chatgpt-mcp.yaml"
+$envFile = Join-Path $BaseDir "config\$Connector.env"
+$profile = Join-Path $BaseDir "config\$Connector.yaml"
 $tunnel = Join-Path $BaseDir "tunnel-client\tunnel-client.exe"
 
 if (-not (Test-Path $envFile)) { throw "Missing secrets file: $envFile" }

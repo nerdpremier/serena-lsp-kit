@@ -2,8 +2,9 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$ProjectPath,
-    [string]$TunnelId = $env:MCP_TUNNEL_ID,
-    [int]$HealthPort = 18090,
+    [string]$SerenaTunnelId = $env:SERENA_TUNNEL_ID,
+    [string]$GitHubTunnelId = $env:GITHUB_TUNNEL_ID,
+    [string]$PlaywrightTunnelId = $env:PLAYWRIGHT_TUNNEL_ID,
     [switch]$SkipGitHub,
     [switch]$SkipPlaywright
 )
@@ -22,9 +23,6 @@ $PlaywrightDir = Join-Path $BaseDir "playwright"
 $BrowsersDir = Join-Path $BaseDir "ms-playwright"
 $SerenaVenv = Join-Path $BaseDir "serena-venv"
 $ConfigDir = Join-Path $BaseDir "config"
-$Profile = Join-Path $ConfigDir "chatgpt-mcp.yaml"
-$EnvFile = Join-Path $ConfigDir "secrets.env"
-$TaskName = "McpTunnelKit"
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -41,6 +39,13 @@ function Read-SecretText([string]$Prompt) {
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
 }
 
+function Read-TunnelId([string]$Current, [string]$Label) {
+    $value = $Current
+    if ([string]::IsNullOrWhiteSpace($value)) { $value = Read-Host "$Label tunnel ID (tunnel_...)" }
+    if ($value -notmatch '^tunnel_[a-z0-9]{32}$') { throw "$Label Tunnel ID must look like tunnel_..." }
+    return $value
+}
+
 function Get-Uv {
     $cmd = Get-Command uv.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
@@ -52,12 +57,7 @@ function Get-Uv {
     return $candidate
 }
 
-function Download-VerifiedZip(
-    [string]$Url,
-    [string]$ChecksumUrl,
-    [string]$AssetName,
-    [string]$Destination
-) {
+function Download-VerifiedZip([string]$Url, [string]$ChecksumUrl, [string]$AssetName, [string]$Destination) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("mcp-kit-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
@@ -93,21 +93,33 @@ function Protect-File([string]$Path) {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
+function Register-ConnectorTask([string]$Name, [string]$Connector, [string]$RunScript) {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $userName = $identity.Name
+    $taskName = "McpTunnelKit-$Name"
+    $actionArgs = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$RunScript`" -BaseDir `"$BaseDir`" -Connector $Connector"
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $actionArgs
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userName
+    $principal = New-ScheduledTaskPrincipal -UserId $userName -LogonType Interactive -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+}
+
 Assert-Administrator
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
 if (-not (Test-Path -LiteralPath $ProjectPath -PathType Container)) { throw "Project directory not found: $ProjectPath" }
 
-if ([string]::IsNullOrWhiteSpace($TunnelId)) { $TunnelId = Read-Host "OpenAI tunnel ID (tunnel_...)" }
-if ($TunnelId -notmatch '^tunnel_[A-Za-z0-9_-]+$') { throw "Tunnel ID must look like tunnel_..." }
+$SerenaTunnelId = Read-TunnelId $SerenaTunnelId "Serena"
+if (-not $SkipGitHub) { $GitHubTunnelId = Read-TunnelId $GitHubTunnelId "GitHub" }
+if (-not $SkipPlaywright) { $PlaywrightTunnelId = Read-TunnelId $PlaywrightTunnelId "Playwright" }
 
 $ControlKey = $env:CONTROL_PLANE_API_KEY
 if ([string]::IsNullOrWhiteSpace($ControlKey)) { $ControlKey = Read-SecretText "OpenAI Control Plane API key" }
 if ([string]::IsNullOrWhiteSpace($ControlKey)) { throw "Control Plane API key is required." }
 
 $GitHubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
-if (-not $SkipGitHub -and [string]::IsNullOrWhiteSpace($GitHubToken)) {
-    $GitHubToken = Read-SecretText "GitHub Personal Access Token"
-}
+if (-not $SkipGitHub -and [string]::IsNullOrWhiteSpace($GitHubToken)) { $GitHubToken = Read-SecretText "GitHub Personal Access Token" }
 if (-not $SkipGitHub -and [string]::IsNullOrWhiteSpace($GitHubToken)) { throw "GitHub token is required unless -SkipGitHub is used." }
 
 New-Item -ItemType Directory -Force -Path $BaseDir, $ConfigDir | Out-Null
@@ -141,14 +153,12 @@ if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
 $TunnelAsset = "tunnel-client-v$TunnelVersion-$TunnelArch.zip"
 Download-VerifiedZip "https://github.com/openai/tunnel-client/releases/download/v$TunnelVersion/$TunnelAsset" "https://github.com/openai/tunnel-client/releases/download/v$TunnelVersion/SHA256SUMS.txt" $TunnelAsset $TunnelDir
 $TunnelExe = Join-Path $TunnelDir "tunnel-client.exe"
-if (-not (Test-Path $TunnelExe)) { throw "tunnel-client.exe missing after extraction" }
 
 $GitHubExe = $null
 if (-not $SkipGitHub) {
     $asset = "github-mcp-server_Windows_$GitHubArch.zip"
     Download-VerifiedZip "https://github.com/github/github-mcp-server/releases/download/v$GitHubMcpVersion/$asset" "https://github.com/github/github-mcp-server/releases/download/v$GitHubMcpVersion/github-mcp-server_${GitHubMcpVersion}_checksums.txt" $asset $GitHubDir
     $GitHubExe = Join-Path $GitHubDir "github-mcp-server.exe"
-    if (-not (Test-Path $GitHubExe)) { throw "github-mcp-server.exe missing after extraction" }
 }
 
 $NodeExe = $null
@@ -158,7 +168,6 @@ if (-not $SkipPlaywright) {
     $nodeStage = Join-Path $BaseDir "node-stage"
     Download-VerifiedZip "https://nodejs.org/dist/v$NodeVersion/$nodeAsset" "https://nodejs.org/dist/v$NodeVersion/SHASUMS256.txt" $nodeAsset $nodeStage
     $nodeRoot = Get-ChildItem -LiteralPath $nodeStage -Directory | Select-Object -First 1
-    if (-not $nodeRoot) { throw "Node archive layout was unexpected" }
     if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
     Move-Item -LiteralPath $nodeRoot.FullName -Destination $NodeDir
     Remove-Item -Recurse -Force $nodeStage
@@ -175,19 +184,35 @@ if (-not $SkipPlaywright) {
 }
 
 $env:CONTROL_PLANE_API_KEY = $ControlKey
-if (-not $SkipGitHub) { $env:GITHUB_PERSONAL_ACCESS_TOKEN = $GitHubToken }
-$args = @($Profile, $EnvFile, $ProjectPath, $TunnelId, "--serena-bin", $SerenaExe, "--health-port", "$HealthPort")
-if ($GitHubExe) { $args += @("--github-bin", $GitHubExe) }
-if ($NodeExe) { $args += @("--node-bin", $NodeExe, "--playwright-cli", $PlaywrightCli, "--playwright-output-dir", (Join-Path $BaseDir "artifacts\playwright")) }
-& $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") @args
-if ($LASTEXITCODE -ne 0) { throw "Runtime profile generation failed" }
-if ($NodeExe) { Add-Content -LiteralPath $EnvFile -Value "PLAYWRIGHT_BROWSERS_PATH=$BrowsersDir" }
-Protect-File $EnvFile
-Protect-File $Profile
+$SerenaProfile = Join-Path $ConfigDir "serena.yaml"
+$SerenaEnv = Join-Path $ConfigDir "serena.env"
+& $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") serena $SerenaProfile $SerenaEnv $SerenaTunnelId --health-port 18090 $ProjectPath --serena-bin $SerenaExe
 
-$env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
-& $TunnelExe doctor --profile-file $Profile --health.listen-addr 127.0.0.1:0 | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "tunnel-client doctor failed" }
+if (-not $SkipGitHub) {
+    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $GitHubToken
+    $GitHubProfile = Join-Path $ConfigDir "github.yaml"
+    $GitHubEnv = Join-Path $ConfigDir "github.env"
+    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") github $GitHubProfile $GitHubEnv $GitHubTunnelId --health-port 18091 --github-bin $GitHubExe
+}
+
+if (-not $SkipPlaywright) {
+    $PlaywrightProfile = Join-Path $ConfigDir "playwright.yaml"
+    $PlaywrightEnv = Join-Path $ConfigDir "playwright.env"
+    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") playwright $PlaywrightProfile $PlaywrightEnv $PlaywrightTunnelId --health-port 18092 --node-bin $NodeExe --playwright-cli $PlaywrightCli --output-dir (Join-Path $BaseDir "artifacts\playwright") --browsers-path $BrowsersDir
+}
+
+Get-ChildItem -LiteralPath $ConfigDir -File | Where-Object { $_.Extension -in @('.yaml', '.env') } | ForEach-Object { Protect-File $_.FullName }
+
+& $TunnelExe doctor --profile-file $SerenaProfile --health.listen-addr 127.0.0.1:0 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Serena tunnel doctor failed" }
+if (-not $SkipGitHub) {
+    & $TunnelExe doctor --profile-file $GitHubProfile --health.listen-addr 127.0.0.1:0 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "GitHub tunnel doctor failed" }
+}
+if (-not $SkipPlaywright) {
+    & $TunnelExe doctor --profile-file $PlaywrightProfile --health.listen-addr 127.0.0.1:0 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Playwright tunnel doctor failed" }
+}
 Write-Host "tunnel_doctor=PASS"
 
 $ScriptsDir = Join-Path $BaseDir "scripts"
@@ -195,24 +220,23 @@ New-Item -ItemType Directory -Force -Path $ScriptsDir | Out-Null
 Copy-Item -Force (Join-Path $PSScriptRoot "scripts\Run-McpTunnel.ps1") (Join-Path $ScriptsDir "Run-McpTunnel.ps1")
 Copy-Item -Force (Join-Path $PSScriptRoot "scripts\Mcp-Stack-Status.ps1") (Join-Path $ScriptsDir "Mcp-Stack-Status.ps1")
 $runScript = Join-Path $ScriptsDir "Run-McpTunnel.ps1"
-$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$userName = $currentIdentity.Name
-$actionArgs = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runScript`" -BaseDir `"$BaseDir`""
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $actionArgs
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $userName
-$principal = New-ScheduledTaskPrincipal -UserId $userName -LogonType Interactive -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName $TaskName
-Start-Sleep -Seconds 4
 
-& (Join-Path $ScriptsDir "Mcp-Stack-Status.ps1") -BaseDir $BaseDir -HealthPort $HealthPort -TaskName $TaskName
-if ($LASTEXITCODE -ne 0) { throw "MCP tunnel task started but readiness check failed" }
+# Remove the old bundled task if upgrading from the one-tunnel layout.
+$legacy = Get-ScheduledTask -TaskName "McpTunnelKit" -ErrorAction SilentlyContinue
+if ($legacy) { Stop-ScheduledTask -TaskName "McpTunnelKit" -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName "McpTunnelKit" -Confirm:$false }
+
+Register-ConnectorTask "Serena" "serena" $runScript
+if (-not $SkipGitHub) { Register-ConnectorTask "GitHub" "github" $runScript }
+if (-not $SkipPlaywright) { Register-ConnectorTask "Playwright" "playwright" $runScript }
+Start-Sleep -Seconds 5
+
+& (Join-Path $ScriptsDir "Mcp-Stack-Status.ps1") -BaseDir $BaseDir
+if ($LASTEXITCODE -ne 0) { throw "One or more MCP tunnel tasks failed readiness checks" }
 
 $env:CONTROL_PLANE_API_KEY = $null
 $env:GITHUB_PERSONAL_ACCESS_TOKEN = $null
+$env:PLAYWRIGHT_BROWSERS_PATH = $null
 $ControlKey = $null
 $GitHubToken = $null
 Write-Host "bootstrap=PASS"
-Write-Host "channels=main,github,playwright"
-Write-Host "task=$TaskName"
+Write-Host "connectors=serena,github,playwright"

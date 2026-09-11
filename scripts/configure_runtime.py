@@ -51,7 +51,7 @@ def _replace_scalar(text: str, key: str, value: str) -> str:
 
 
 def _validate_tunnel_id(tunnel_id: str) -> None:
-    if not re.fullmatch(r"tunnel_[A-Za-z0-9_-]+", tunnel_id):
+    if not re.fullmatch(r"tunnel_[a-z0-9]{32}", tunnel_id):
         raise ValueError("tunnel id must look like tunnel_...")
 
 

@@ -97,6 +97,7 @@ fi
 "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/patch_serena.py" "$PACKAGE_ROOT"
 
 install -m 0755 "$SCRIPT_DIR/scripts/serena-stack-status" /usr/local/sbin/serena-stack-status
+install -m 0700 "$SCRIPT_DIR/scripts/rotate-serena-control-plane-key" /usr/local/sbin/rotate-mcp-control-plane-key
 install -m 0700 "$SCRIPT_DIR/scripts/rotate-serena-control-plane-key" /usr/local/sbin/rotate-serena-control-plane-key
 
 SERENA_PACKAGE_ROOT="$PACKAGE_ROOT" "$SERENA_PYTHON" - <<'PY'

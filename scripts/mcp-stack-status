@@ -1,28 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE="${MCP_TUNNEL_SERVICE:-serena-tunnel.service}"
 TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
-HEALTH_PORT="${MCP_HEALTH_PORT:-18090}"
-
-service="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
 version="$("${TUNNEL_DIR}/tunnel-client" --version 2>/dev/null || echo unavailable)"
-health="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/healthz" 2>/dev/null || echo unavailable)"
-ready="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/readyz" 2>/dev/null || echo unavailable)"
-serena_processes="$(pgrep -fc 'serena.*start-mcp-server' 2>/dev/null || true)"
-github_processes="$(pgrep -fc 'github-mcp-server.*stdio' 2>/dev/null || true)"
-playwright_processes="$(pgrep -fc '@playwright/mcp|playwright/mcp/cli.js' 2>/dev/null || true)"
-tunnel_processes="$(pgrep -fc 'tunnel-client.*run' 2>/dev/null || true)"
-recent_errors="$(journalctl -u "$SERVICE" --since '10 minutes ago' -p err -q --no-pager -o cat 2>/dev/null | grep -c . || true)"
 
-echo "service=$service"
 echo "tunnel_version=$version"
-echo "health=$health"
-echo "ready=$ready"
-echo "serena_processes=$serena_processes"
-echo "github_mcp_processes=$github_processes"
-echo "playwright_mcp_processes=$playwright_processes"
-echo "tunnel_processes=$tunnel_processes"
-echo "recent_errors=$recent_errors"
+failed=0
+for entry in \
+  "serena:mcp-serena-tunnel.service:18090" \
+  "github:mcp-github-tunnel.service:18091" \
+  "playwright:mcp-playwright-tunnel.service:18092"; do
+  IFS=: read -r name service port <<< "$entry"
+  state="$(systemctl is-active "$service" 2>/dev/null || true)"
+  if [[ "$state" == "unknown" || "$state" == "inactive" || "$state" == "failed" ]]; then
+    # Optional connector may not have been installed.
+    if ! systemctl cat "$service" >/dev/null 2>&1; then
+      echo "${name}_service=not-installed"
+      continue
+    fi
+  fi
+  health="$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" 2>/dev/null || echo unavailable)"
+  ready="$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/readyz" 2>/dev/null || echo unavailable)"
+  echo "${name}_service=$state"
+  echo "${name}_health=$health"
+  echo "${name}_ready=$ready"
+  if [[ "$state" != "active" || "$health" != "live" || "$ready" != "ready" ]]; then
+    failed=1
+  fi
+done
 
-[[ "$service" == "active" && "$health" == "live" && "$ready" == "ready" ]]
+tunnels="$(ps -eo comm= | awk '$1=="tunnel-client" {n++} END {print n+0}')"
+echo "tunnel_processes=$tunnels"
+exit "$failed"

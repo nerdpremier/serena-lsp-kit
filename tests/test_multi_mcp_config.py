@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "multi_mcp_config.py"
 spec = importlib.util.spec_from_file_location("multi_mcp_config", MODULE_PATH)
 assert spec and spec.loader
@@ -17,53 +16,64 @@ spec.loader.exec_module(multi)
 
 
 class MultiMcpConfigTests(unittest.TestCase):
-    def test_linux_profile_has_three_channels_and_no_secrets(self) -> None:
-        root = Path("/opt/mcp-kit")
-        runtime = multi.RuntimeSpec(
-            project=Path("/srv/project"),
-            tunnel_id="tunnel_abc123",
-            serena_bin="/opt/mcp-kit/serena/bin/serena",
-            github_bin="/opt/mcp-kit/bin/github-mcp-server",
-            node_bin="/opt/mcp-kit/node/bin/node",
-            playwright_cli="/opt/mcp-kit/playwright/node_modules/@playwright/mcp/cli.js",
-            playwright_output_dir=root / "artifacts/playwright",
-        )
-        text = multi.render_profile(runtime)
-        self.assertIn("channel: main", text)
-        self.assertIn("channel: github", text)
-        self.assertIn("channel: playwright", text)
-        self.assertIn("github-mcp-server", text)
-        self.assertIn("--headless", text)
-        self.assertNotIn("cp-secret", text)
-        self.assertNotIn("gh-secret", text)
+    def test_each_connector_is_main_on_its_own_tunnel(self) -> None:
+        profiles = {
+            "serena": multi.render_profile(
+                "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", multi.serena_command("/opt/serena/bin/serena", Path("/workspace")), 18090
+            ),
+            "github": multi.render_profile(
+                "tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", multi.github_command("/opt/github-mcp/github-mcp-server"), 18091
+            ),
+            "playwright": multi.render_profile(
+                "tunnel_cccccccccccccccccccccccccccccccc",
+                multi.playwright_command(
+                    "/opt/node/bin/node",
+                    "/opt/playwright/node_modules/@playwright/mcp/cli.js",
+                    Path("/tmp/pw-out"),
+                ),
+                18092,
+            ),
+        }
+        for name, text in profiles.items():
+            with self.subTest(name=name):
+                self.assertEqual(text.count("channel: main"), 1)
+                self.assertNotIn("channel: github", text)
+                self.assertNotIn("channel: playwright", text)
+        self.assertIn("tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", profiles["serena"])
+        self.assertIn("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", profiles["github"])
+        self.assertIn("tunnel_cccccccccccccccccccccccccccccccc", profiles["playwright"])
 
-    def test_windows_paths_are_single_quoted_for_tunnel_parser(self) -> None:
-        cmd = multi.command_line(
-            r"C:\Program Files\nodejs\node.exe",
-            r"C:\ProgramData\McpTunnelKit\playwright\cli.js",
-            "--headless",
-        )
-        self.assertIn("'C:\\Program Files\\nodejs\\node.exe'", cmd)
-        self.assertIn("'C:\\ProgramData\\McpTunnelKit\\playwright\\cli.js'", cmd)
+    def test_secrets_are_scoped_per_connector(self) -> None:
+        openai = "fixture-openai-key"
+        github = "fixture-github-token"
+        serena = multi.render_env("serena", openai, github_token=github)
+        github_env = multi.render_env("github", openai, github_token=github)
+        playwright = multi.render_env("playwright", openai, github_token=github, browsers_path="/tmp/browsers")
+        self.assertIn(openai, serena)
+        self.assertNotIn(github, serena)
+        self.assertIn(github, github_env)
+        self.assertNotIn("PLAYWRIGHT_BROWSERS_PATH", github_env)
+        self.assertNotIn(github, playwright)
+        self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/tmp/browsers", playwright)
 
-    def test_env_keeps_github_and_openai_secrets_out_of_profile(self) -> None:
+    def test_runtime_files_do_not_put_secrets_in_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            profile = root / "profile.yaml"
-            env_file = root / "secrets.env"
-            runtime = multi.RuntimeSpec(
-                project=root / "project",
-                tunnel_id="tunnel_test123",
-                serena_bin="/bin/serena",
-                github_bin="/bin/github-mcp-server",
-            )
-            (root / "project").mkdir()
+            profile = root / "github.yaml"
+            env_file = root / "github.env"
             old_cp = os.environ.get("CONTROL_PLANE_API_KEY")
             old_gh = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
             try:
-                os.environ["CONTROL_PLANE_API_KEY"] = "cp-secret-value"
-                os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = "gh-secret-value"
-                multi.create_runtime_files(profile, env_file, runtime)
+                os.environ["CONTROL_PLANE_API_KEY"] = "fixture-control-key"
+                os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = "fixture-github-token"
+                multi.create_runtime(
+                    profile,
+                    env_file,
+                    kind="github",
+                    tunnel_id="tunnel_dddddddddddddddddddddddddddddddd",
+                    command=multi.github_command("/opt/github-mcp/github-mcp-server"),
+                    health_port=18091,
+                )
             finally:
                 if old_cp is None:
                     os.environ.pop("CONTROL_PLANE_API_KEY", None)
@@ -73,36 +83,28 @@ class MultiMcpConfigTests(unittest.TestCase):
                     os.environ.pop("GITHUB_PERSONAL_ACCESS_TOKEN", None)
                 else:
                     os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = old_gh
-            profile_text = profile.read_text(encoding="utf-8")
-            env_text = env_file.read_text(encoding="utf-8")
-            self.assertNotIn("cp-secret-value", profile_text)
-            self.assertNotIn("gh-secret-value", profile_text)
-            self.assertIn("CONTROL_PLANE_API_KEY=cp-secret-value", env_text)
-            self.assertIn("GITHUB_PERSONAL_ACCESS_TOKEN=gh-secret-value", env_text)
-            self.assertIn("GITHUB_LOCKDOWN_MODE=1", env_text)
+            yaml = profile.read_text(encoding="utf-8")
+            env = env_file.read_text(encoding="utf-8")
+            self.assertNotIn("fixture-control-key", yaml)
+            self.assertNotIn("fixture-github-token", yaml)
+            self.assertIn('api_key: "env:CONTROL_PLANE_API_KEY"', yaml)
+            self.assertIn("fixture-control-key", env)
+            self.assertIn("fixture-github-token", env)
+            self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
 
-    def test_github_channel_requires_token(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            runtime = multi.RuntimeSpec(
-                project=root,
-                tunnel_id="tunnel_test123",
-                serena_bin="serena",
-                github_bin="github-mcp-server",
-            )
-            old_cp = os.environ.get("CONTROL_PLANE_API_KEY")
-            old_gh = os.environ.pop("GITHUB_PERSONAL_ACCESS_TOKEN", None)
-            try:
-                os.environ["CONTROL_PLANE_API_KEY"] = "cp-secret"
-                with self.assertRaisesRegex(ValueError, "GITHUB_PERSONAL_ACCESS_TOKEN"):
-                    multi.create_runtime_files(root / "profile", root / "env", runtime)
-            finally:
-                if old_cp is None:
-                    os.environ.pop("CONTROL_PLANE_API_KEY", None)
-                else:
-                    os.environ["CONTROL_PLANE_API_KEY"] = old_cp
-                if old_gh is not None:
-                    os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = old_gh
+    def test_windows_paths_are_safe_for_tunnel_parser(self) -> None:
+        cmd = multi.playwright_command(
+            r"C:\Program Files\nodejs\node.exe",
+            r"C:\ProgramData\McpTunnelKit\playwright\cli.js",
+            Path(r"C:\ProgramData\McpTunnelKit\artifacts\playwright"),
+        )
+        self.assertIn("'C:\\Program Files\\nodejs\\node.exe'", cmd)
+        self.assertIn("'C:\\ProgramData\\McpTunnelKit\\playwright\\cli.js'", cmd)
+
+    def test_github_requires_token(self) -> None:
+        with self.assertRaises(ValueError):
+            multi.render_env("github", "fixture-openai", github_token="")
 
 
 if __name__ == "__main__":
