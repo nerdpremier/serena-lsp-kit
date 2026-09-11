@@ -1,77 +1,40 @@
-# Serena LSP Kit
+# Serena LSP Kit — MCP Tunnel Bundle
 
-A reproducible installer and hardening kit for running **Serena 1.7.0** through the **OpenAI MCP tunnel** in **LSP-only** mode.
+Cross-platform installer for an OpenAI Secure MCP Tunnel with three local MCP servers:
 
-## What this is
+| Channel | MCP server | Purpose |
+| --- | --- | --- |
+| `main` | Serena `1.7.0` | code intelligence, symbols, refactoring |
+| `github` | GitHub MCP Server `1.12.1` | repositories, issues, PRs, Actions, code security |
+| `playwright` | Playwright MCP `0.0.80` | browser automation and web testing |
 
-This repository is the setup layer for this connection path:
+The kit supports **Linux (systemd)** and **Windows 10/11**. The same tunnel-client process can route requests to multiple logical MCP channels.
 
-```text
-ChatGPT / OpenAI MCP control plane
-            |
-            | outbound tunnel
-            v
-      tunnel-client 0.0.14
-            |
-            | stdio MCP
-            v
-        Serena 1.7.0
-            |
-            v
-       your project
-```
+## Pinned runtime
 
-`serena-lsp-kit` is not a replacement for Serena or tunnel-client. It installs/configures them so a machine can expose one local Serena project to ChatGPT through the OpenAI tunnel reliably.
+- OpenAI `tunnel-client` `0.0.14`
+- Serena `1.7.0`, patched LSP-only
+- GitHub MCP Server `1.12.1` native binary
+- Node.js `24.21.0` LTS
+- Playwright MCP `0.0.80`
 
-The kit:
+Downloaded release artifacts are checked against their upstream SHA256 files before installation.
 
-- pins `tunnel-client` to `0.0.14` and verifies the upstream checksum
-- installs Serena `1.7.0` on a fresh machine when needed
-- starts Serena with an explicit project path so the active project survives reconnects
-- uses LSP-only mode and removes JetBrains-specific Serena tools
-- moves tunnel health off port `8080` (default: `18090`)
-- reduces oversized/stale MCP responses with tighter Serena timeout/output limits
-- adds project ignores for virtualenvs, node_modules, build output and caches
-- stores the Control Plane API key in a root-only environment file, never in Git
-- installs status, rollback, and API-key rotation helpers
-- runs as a systemd service and can start automatically at boot
+## Credentials
 
-## What you need from OpenAI
+You need these values:
 
-A fresh machine needs only two OpenAI values:
+1. **OpenAI Tunnel ID** — `tunnel_...`
+2. **OpenAI Control Plane API key** — a runtime key with tunnel Read + Use permission
+3. **GitHub Personal Access Token** — required only when the GitHub MCP channel is enabled
 
-1. **Tunnel ID** — looks like `tunnel_...`
-2. **Control Plane API key** — supplied as `CONTROL_PLANE_API_KEY`
+The OpenAI runtime key and GitHub token are never written into the tunnel YAML and must never be committed to Git.
 
-The tunnel profile stores only:
+For GitHub, prefer a fine-grained PAT limited to only the repositories and permissions you actually need. The GitHub MCP server is configured with lockdown mode enabled by default.
 
-```yaml
-control_plane:
-  tunnel_id: "tunnel_..."
-  api_key: "env:CONTROL_PLANE_API_KEY"
-```
+## Linux install
 
-The actual API key is stored separately in:
-
-```text
-/root/.config/tunnel-client/serena-tunnel.env
-```
-
-with mode `0600`.
-
-`tunnel-client --help` lists the canonical setup pages:
-
-- Tunnels: `https://platform.openai.com/settings/organization/tunnels`
-- API keys: `https://platform.openai.com/settings/organization/api-keys`
-- ChatGPT connector settings: `https://chatgpt.com/#settings/Connectors`
-
-Do not commit either a real API key or a machine-specific tunnel profile to this repository.
-
-## Fresh machine install
-
-Supported target: Linux with systemd, Python 3.11–3.14, `python3-venv`, `curl`, `unzip`, and `sha256sum`.
-
-Clone the repository, then run:
+Prerequisites: Linux with systemd, root access, Python 3 with `venv`, `curl`, `unzip`, `tar`, and `sha256sum`.
 
 ```bash
 git clone https://github.com/nerdpremier/serena-lsp-kit.git
@@ -79,98 +42,143 @@ cd serena-lsp-kit
 sudo ./bootstrap.sh /absolute/path/to/project
 ```
 
-The installer asks:
+The installer prompts for Tunnel ID, OpenAI runtime key, and GitHub PAT. Secret input is hidden.
 
-```text
-OpenAI tunnel ID (tunnel_...):
-OpenAI Control Plane API key:
-```
-
-The API-key input is hidden. After that, `bootstrap.sh` will:
-
-1. install/use Serena `1.7.0`;
-2. create Serena global/project config if missing;
-3. install `tunnel-client 0.0.14`;
-4. create the tunnel profile;
-5. create the root-only key file;
-6. validate the tunnel profile with `tunnel-client doctor`;
-7. create/use `serena-tunnel.service`;
-8. apply the LSP-only stability patch;
-9. enable/start the service;
-10. verify `/healthz` and `/readyz`.
-
-You can provide the tunnel ID on the command line while still entering the key securely:
+Non-interactive provisioning is also supported:
 
 ```bash
-sudo ./bootstrap.sh /absolute/path/to/project --tunnel-id tunnel_...
+sudo env \
+  MCP_TUNNEL_ID='tunnel_...' \
+  CONTROL_PLANE_API_KEY='...' \
+  GITHUB_PERSONAL_ACCESS_TOKEN='...' \
+  ./bootstrap.sh /absolute/path/to/project
 ```
 
-For automated provisioning, `SERENA_TUNNEL_ID` and `CONTROL_PLANE_API_KEY` environment variables are also supported. Interactive key entry is preferred on shared systems.
+Optional channels can be disabled:
 
-## Existing installation
+```bash
+sudo ./bootstrap.sh /path/to/project --skip-github
+sudo ./bootstrap.sh /path/to/project --skip-playwright
+```
 
-If Serena/tunnel-client are already configured and you only want the hardening changes:
+Linux runtime files are kept under `/opt/serena-lsp-kit`, `/root/.config/tunnel-client`, and the existing compatibility service name `serena-tunnel.service`.
+
+Check status:
+
+```bash
+mcp-stack-status
+```
+
+## Windows install
+
+Open **PowerShell as Administrator**:
+
+```powershell
+git clone https://github.com/nerdpremier/serena-lsp-kit.git
+Set-Location .\serena-lsp-kit
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1 -ProjectPath 'C:\path\to\project'
+```
+
+The Windows installer:
+
+- installs `uv` when needed using Astral's official installer;
+- creates an isolated Serena environment under `C:\ProgramData\McpTunnelKit`;
+- downloads verified Windows builds of tunnel-client and GitHub MCP;
+- downloads a verified portable Node.js build and installs Playwright MCP + Chromium;
+- creates the same three MCP channels as Linux;
+- stores secrets in `C:\ProgramData\McpTunnelKit\config\secrets.env` with restricted ACLs;
+- registers a `McpTunnelKit` Scheduled Task that starts at user logon;
+- runs `tunnel-client doctor` and local health/readiness checks.
+
+Non-interactive values can be supplied as environment variables before running `bootstrap.ps1`:
+
+```powershell
+$env:MCP_TUNNEL_ID = 'tunnel_...'
+$env:CONTROL_PLANE_API_KEY = '...'
+$env:GITHUB_PERSONAL_ACCESS_TOKEN = '...'
+.\bootstrap.ps1 -ProjectPath 'C:\path\to\project'
+```
+
+Check Windows status:
+
+```powershell
+& 'C:\ProgramData\McpTunnelKit\scripts\Mcp-Stack-Status.ps1'
+```
+
+## How routing works
+
+`tunnel-client` requires a `main` channel and supports additional channel-qualified MCP bindings. This kit uses:
+
+```text
+OpenAI Tunnel
+├── main        -> Serena
+├── github      -> GitHub MCP Server
+└── playwright  -> Playwright MCP
+```
+
+The caller must send the matching logical channel for `github` or `playwright`. Clients that only ever address the default `main` channel will see Serena only; in that case use separate tunnel/profile instances for the other MCP servers.
+
+## Serena hardening
+
+The Serena installation is deliberately LSP-only:
+
+- explicit project path at startup;
+- JetBrains-specific tools removed from the runtime registry;
+- global language backend forced to LSP;
+- tool timeout reduced to 90 seconds;
+- maximum tool response reduced to 30,000 characters;
+- noisy project/cache paths ignored;
+- warning/error logging by default.
+
+A client that cached old MCP schemas may need a new chat/client session after installation.
+
+## GitHub MCP defaults
+
+GitHub MCP receives its PAT through `GITHUB_PERSONAL_ACCESS_TOKEN` and is started with these environment defaults:
+
+```text
+GITHUB_TOOLSETS=default,actions,code_security
+GITHUB_LOCKDOWN_MODE=1
+```
+
+The token is not part of the YAML command line.
+
+## Playwright defaults
+
+Playwright MCP runs:
+
+- headless;
+- isolated browser profile;
+- with a dedicated Chromium installation;
+- with output artifacts under the kit data directory.
+
+No Playwright credential is required by the installer. Website credentials remain the responsibility of the browser session/application being tested.
+
+## Linux upgrade path
+
+Existing Linux Serena-only installations can continue using:
 
 ```bash
 sudo ./install.sh /absolute/path/to/project --restart
 ```
 
-Without `--restart`, changes are staged and validated but the service is left running until you restart it yourself.
-
-## Status
-
-```bash
-serena-stack-status
-```
-
-Healthy output should look like:
-
-```text
-service=active
-tunnel_version=0.0.14+...
-health=live
-ready=ready
-port_8080=FREE
-serena_processes=1
-tunnel_processes=1
-recent_errors=0
-```
-
-## Rotate the Control Plane API key
-
-```bash
-rotate-serena-control-plane-key
-```
-
-The helper reads the new key with terminal echo disabled, restarts the service, checks health, and rolls the local key file back automatically if startup fails. Revoke the previous key in the OpenAI dashboard after a successful rotation.
-
-## LSP-only behavior
-
-The installer backs up Serena package files, removes `serena/tools/jetbrains_tools.py`, removes the unconditional JetBrains tool import, and makes this Serena installation intentionally LSP-only.
-
-After installation:
-
-- `LanguageBackend.LSP` works normally;
-- `jet_brains_*` tools are not registered;
-- selecting the JetBrains backend fails with a clear LSP-only message.
-
-Some MCP clients cache tool schemas for the lifetime of a chat/session. Start a new client session after installation if old `jet_brains_*` schemas are still visible.
+`bootstrap.sh` is the recommended command for a fresh multi-MCP installation.
 
 ## Rollback
 
-Backups are stored under:
+The legacy Linux Serena patch keeps backups under:
 
 ```text
 /root/.serena/lsp-only-kit-backups/
 ```
 
-Restore the latest Serena package/config backup with:
+Restore the most recent Serena package/config backup with:
 
 ```bash
 sudo ./rollback.sh --restart
 ```
 
-Rollback intentionally does not put an API key back into a systemd unit. The root-only environment file remains the credential source.
+Rollback intentionally does not put API keys back into a systemd unit.
 
 ## Development
 
@@ -178,18 +186,26 @@ Rollback intentionally does not put an API key back into a systemd unit. The roo
 make test
 ```
 
-Tests use temporary fixtures and do not modify the machine running the test suite. GitHub Actions runs Python syntax checks, shell syntax, ShellCheck, and unit tests on every push/PR.
+CI validates Linux and Windows separately. Linux runs Python tests, Bash syntax, and ShellCheck. Windows validates the shared profile generator and parses all PowerShell installers using the PowerShell AST parser.
 
-## Security
+## Security notes
 
-- No API keys belong in this repository.
-- `.env`, key, credential, backup, and runtime-secret files are ignored by Git.
-- Fresh setup writes the key only to a `0600` root-owned environment file.
-- The YAML profile references the key through `env:CONTROL_PLANE_API_KEY`.
-- Secret values are never printed by the installer.
-- The rotation helper uses hidden terminal input.
-- `tunnel-client` release downloads are verified against the upstream `SHA256SUMS.txt`.
+- No real Tunnel ID, OpenAI key, or GitHub token belongs in this repository.
+- The tunnel profile stores `api_key: env:CONTROL_PLANE_API_KEY`, never the literal runtime key.
+- Linux secrets use root-only mode `0600`.
+- Windows secrets use a protected ACL for the installing user, SYSTEM, and Administrators only.
+- Playwright is headless and isolated by default.
+- GitHub lockdown mode is enabled by default; use a least-privilege PAT.
+- All downloaded pinned release archives are SHA256 verified against upstream checksum files.
+
+## Upstream projects
+
+- OpenAI tunnel-client: https://github.com/openai/tunnel-client
+- Serena: https://github.com/oraios/serena
+- GitHub MCP Server: https://github.com/github/github-mcp-server
+- Playwright MCP: https://github.com/microsoft/playwright-mcp
+- Node.js: https://nodejs.org/
 
 ## License
 
-MIT. This repository contains only the installer/patching glue authored for this kit; Serena and tunnel-client remain governed by their respective upstream licenses.
+MIT. This repository contains only installation/configuration glue. Each upstream dependency retains its own license.

@@ -1,5 +1,7 @@
 .serena/
 __pycache__/
+node_modules/
+.mcp-artifacts/
 *.py[cod]
 *.log
 *.env

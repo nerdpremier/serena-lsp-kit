@@ -8,20 +8,56 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install shellcheck
+      - name: Install linters
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Python syntax
-        run: python -m py_compile scripts/patch_serena.py scripts/configure_runtime.py
+        run: python -m py_compile scripts/patch_serena.py scripts/configure_runtime.py scripts/multi_mcp_config.py
       - name: Shell syntax
-        run: bash -n bootstrap.sh install.sh rollback.sh scripts/update_tunnel_client.sh scripts/serena-stack-status scripts/rotate-serena-control-plane-key
+        run: bash -n bootstrap.sh install.sh rollback.sh scripts/update_tunnel_client.sh scripts/update_github_mcp.sh scripts/update_node_playwright.sh scripts/serena-stack-status scripts/mcp-stack-status scripts/rotate-serena-control-plane-key
       - name: Shellcheck
-        run: shellcheck bootstrap.sh install.sh rollback.sh scripts/update_tunnel_client.sh scripts/serena-stack-status scripts/rotate-serena-control-plane-key
+        run: shellcheck bootstrap.sh install.sh rollback.sh scripts/update_tunnel_client.sh scripts/update_github_mcp.sh scripts/update_node_playwright.sh scripts/serena-stack-status scripts/mcp-stack-status scripts/rotate-serena-control-plane-key
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Check pinned upstream assets
+        run: |
+          curl -fsI https://github.com/openai/tunnel-client/releases/download/v0.0.14/tunnel-client-v0.0.14-linux-amd64.zip >/dev/null
+          curl -fsI https://github.com/github/github-mcp-server/releases/download/v1.12.1/github-mcp-server_Linux_x86_64.tar.gz >/dev/null
+          curl -fsI https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz >/dev/null
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Python syntax
+        run: python -m py_compile scripts/multi_mcp_config.py
+      - name: Cross-platform config tests
+        run: python -m unittest discover -s tests -p test_multi_mcp_config.py -v
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $files = @('bootstrap.ps1', 'scripts/Run-McpTunnel.ps1', 'scripts/Mcp-Stack-Status.ps1')
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              exit 1
+            }
+          }
+      - name: Check pinned upstream assets
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Method Head -Uri https://github.com/openai/tunnel-client/releases/download/v0.0.14/tunnel-client-v0.0.14-windows-amd64.zip | Out-Null
+          Invoke-WebRequest -Method Head -Uri https://github.com/github/github-mcp-server/releases/download/v1.12.1/github-mcp-server_Windows_x86_64.zip | Out-Null
+          Invoke-WebRequest -Method Head -Uri https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip | Out-Null

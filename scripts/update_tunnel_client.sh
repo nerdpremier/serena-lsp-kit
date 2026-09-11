@@ -3,16 +3,22 @@ set -euo pipefail
 
 VERSION="${TUNNEL_CLIENT_VERSION:-0.0.14}"
 TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
-ARCH="${TUNNEL_CLIENT_ARCH:-linux-amd64}"
+
+if [[ -n "${TUNNEL_CLIENT_ARCH:-}" ]]; then
+  ARCH="$TUNNEL_CLIENT_ARCH"
+else
+  case "$(uname -m)" in
+    x86_64|amd64) ARCH="linux-amd64" ;;
+    aarch64|arm64) ARCH="linux-arm64" ;;
+    *) echo "error: unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+fi
+
 ASSET="tunnel-client-v${VERSION}-${ARCH}.zip"
 CHECKSUMS="SHA256SUMS.txt"
 BASE_URL="https://github.com/openai/tunnel-client/releases/download/v${VERSION}"
 
-if [[ "$(id -u)" -ne 0 ]]; then
-  echo "error: run as root" >&2
-  exit 1
-fi
-
+[[ "$(id -u)" -eq 0 ]] || { echo "error: run as root" >&2; exit 1; }
 for tool in curl unzip sha256sum mktemp; do
   command -v "$tool" >/dev/null 2>&1 || { echo "error: missing $tool" >&2; exit 1; }
 done
@@ -27,12 +33,11 @@ fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-
 curl -fsSL "$BASE_URL/$ASSET" -o "$work/$ASSET"
 curl -fsSL "$BASE_URL/$CHECKSUMS" -o "$work/$CHECKSUMS"
 (
   cd "$work"
-  grep "  ${ASSET}$" "$CHECKSUMS" | sha256sum -c -
+  grep -E "[[:space:]]${ASSET}$" "$CHECKSUMS" | sha256sum -c -
 )
 
 mkdir -p "$work/unpack"
@@ -47,7 +52,6 @@ if [[ -e "$TUNNEL_DIR/tunnel-client" ]]; then
     [[ -e "$TUNNEL_DIR/$f" ]] && cp -a "$TUNNEL_DIR/$f" "$backup/"
   done
 fi
-
 for f in "$work/unpack"/*; do
   cp -a "$f" "$TUNNEL_DIR/"
 done

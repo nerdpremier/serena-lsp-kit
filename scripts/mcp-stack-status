@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE="${MCP_TUNNEL_SERVICE:-serena-tunnel.service}"
+TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
+HEALTH_PORT="${MCP_HEALTH_PORT:-18090}"
+
+service="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+version="$("${TUNNEL_DIR}/tunnel-client" --version 2>/dev/null || echo unavailable)"
+health="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/healthz" 2>/dev/null || echo unavailable)"
+ready="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/readyz" 2>/dev/null || echo unavailable)"
+serena_processes="$(pgrep -fc 'serena.*start-mcp-server' 2>/dev/null || true)"
+github_processes="$(pgrep -fc 'github-mcp-server.*stdio' 2>/dev/null || true)"
+playwright_processes="$(pgrep -fc '@playwright/mcp|playwright/mcp/cli.js' 2>/dev/null || true)"
+tunnel_processes="$(pgrep -fc 'tunnel-client.*run' 2>/dev/null || true)"
+recent_errors="$(journalctl -u "$SERVICE" --since '10 minutes ago' -p err -q --no-pager -o cat 2>/dev/null | grep -c . || true)"
+
+echo "service=$service"
+echo "tunnel_version=$version"
+echo "health=$health"
+echo "ready=$ready"
+echo "serena_processes=$serena_processes"
+echo "github_mcp_processes=$github_processes"
+echo "playwright_mcp_processes=$playwright_processes"
+echo "tunnel_processes=$tunnel_processes"
+echo "recent_errors=$recent_errors"
+
+[[ "$service" == "active" && "$health" == "live" && "$ready" == "ready" ]]
