@@ -2,7 +2,15 @@
 set -euo pipefail
 
 TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
-version="$("${TUNNEL_DIR}/tunnel-client" --version 2>/dev/null || echo unavailable)"
+VERSION_FILE="${MCP_TUNNEL_VERSION_FILE:-/usr/local/share/mcp-tunnel-kit/tunnel-client.version}"
+
+if version="$("${TUNNEL_DIR}/tunnel-client" --version 2>/dev/null)"; then
+  :
+elif [[ -r "$VERSION_FILE" ]]; then
+  version="$(cat "$VERSION_FILE")"
+else
+  version="unavailable"
+fi
 
 echo "tunnel_version=$version"
 failed=0

@@ -117,6 +117,10 @@ if [[ ! -f "$SERENA_CONFIG" ]]; then HOME=/root "$SERENA_BIN" init -b LSP; fi
 if [[ ! -f "$PROJECT_PATH/.serena/project.yml" ]]; then HOME=/root "$SERENA_BIN" project create "$PROJECT_PATH"; fi
 
 TUNNEL_DIR="$TUNNEL_DIR" "$SCRIPT_DIR/scripts/update_tunnel_client.sh"
+TUNNEL_VERSION_FILE="/usr/local/share/mcp-tunnel-kit/tunnel-client.version"
+install -d -m 0755 "$(dirname "$TUNNEL_VERSION_FILE")"
+"$TUNNEL_DIR/tunnel-client" --version >"$TUNNEL_VERSION_FILE"
+chmod 0644 "$TUNNEL_VERSION_FILE"
 
 GITHUB_BIN=""
 if [[ "$ENABLE_GITHUB" == true ]]; then
