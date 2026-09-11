@@ -90,8 +90,9 @@ class MultiMcpConfigTests(unittest.TestCase):
             self.assertIn('api_key: "env:CONTROL_PLANE_API_KEY"', yaml)
             self.assertIn("fixture-control-key", env)
             self.assertIn("fixture-github-token", env)
-            self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
 
     def test_windows_paths_are_safe_for_tunnel_parser(self) -> None:
         cmd = multi.playwright_command(
