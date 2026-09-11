@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE="${SERENA_SERVICE:-serena-tunnel.service}"
+ENV_FILE="${TUNNEL_ENV:-/root/.config/tunnel-client/serena-tunnel.env}"
+HEALTH_PORT="${SERENA_HEALTH_PORT:-18090}"
+
+[[ "$(id -u)" -eq 0 ]] || { echo "error: run as root" >&2; exit 1; }
+[[ -f "$ENV_FILE" ]] || { echo "error: missing $ENV_FILE" >&2; exit 1; }
+
+printf 'New CONTROL_PLANE_API_KEY: ' >&2
+IFS= read -r -s new_key
+printf '\n' >&2
+[[ -n "$new_key" ]] || { echo "error: key cannot be empty" >&2; exit 1; }
+
+backup="${ENV_FILE}.rotation-backup"
+cp -a "$ENV_FILE" "$backup"
+chmod 0600 "$backup"
+
+tmp="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+printf 'CONTROL_PLANE_API_KEY=%s\n' "$new_key" > "$tmp"
+unset new_key
+chmod 0600 "$tmp"
+mv "$tmp" "$ENV_FILE"
+trap - EXIT
+
+if systemctl restart "$SERVICE"; then
+  sleep 2
+  health="$(curl -fsS --max-time 4 "http://127.0.0.1:${HEALTH_PORT}/healthz" 2>/dev/null || true)"
+  ready="$(curl -fsS --max-time 4 "http://127.0.0.1:${HEALTH_PORT}/readyz" 2>/dev/null || true)"
+else
+  health=""
+  ready=""
+fi
+
+if [[ "$health" == "live" && "$ready" == "ready" ]]; then
+  rm -f "$backup"
+  echo "rotation=PASS"
+  exit 0
+fi
+
+cp -a "$backup" "$ENV_FILE"
+chmod 0600 "$ENV_FILE"
+rm -f "$backup"
+systemctl restart "$SERVICE" || true
+sleep 2
+
+echo "error: new key failed tunnel health validation; previous key restored" >&2
+exit 1

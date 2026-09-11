@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE="${SERENA_SERVICE:-serena-tunnel.service}"
+TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
+HEALTH_PORT="${SERENA_HEALTH_PORT:-18090}"
+
+service="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+version="$($TUNNEL_DIR/tunnel-client --version 2>/dev/null || echo unavailable)"
+health="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/healthz" 2>/dev/null || echo unavailable)"
+ready="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/readyz" 2>/dev/null || echo unavailable)"
+
+if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)8080$'; then
+  port_8080=BUSY
+else
+  port_8080=FREE
+fi
+
+serena_processes="$(ps -eo comm= | awk '$1=="serena" {n++} END {print n+0}')"
+tunnel_processes="$(ps -eo comm= | awk '$1=="tunnel-client" {n++} END {print n+0}')"
+recent_errors="$(journalctl -u "$SERVICE" --since '10 minutes ago' -p err -q --no-pager -o cat 2>/dev/null | grep -c . || true)"
+
+echo "service=$service"
+echo "tunnel_version=$version"
+echo "health=$health"
+echo "ready=$ready"
+echo "port_8080=$port_8080"
+echo "serena_processes=$serena_processes"
+echo "tunnel_processes=$tunnel_processes"
+echo "recent_errors=$recent_errors"
+
+[[ "$service" == "active" && "$health" == "live" && "$ready" == "ready" ]]

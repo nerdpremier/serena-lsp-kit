@@ -1,0 +1,14 @@
+.serena/
+__pycache__/
+*.py[cod]
+*.log
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+*.bak
+*.backup
+*.secret
+.runtime/
+.tmp/
