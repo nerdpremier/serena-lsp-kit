@@ -18,7 +18,7 @@ for tool in curl unzip sha256sum mktemp; do
 done
 
 if [[ -x "$TUNNEL_DIR/tunnel-client" ]]; then
-  current="$($TUNNEL_DIR/tunnel-client --version 2>/dev/null || true)"
+  current="$("${TUNNEL_DIR}/tunnel-client" --version 2>/dev/null || true)"
   if [[ "$current" == "${VERSION}"* ]]; then
     echo "tunnel_client_already=${current}"
     exit 0
@@ -53,6 +53,6 @@ for f in "$work/unpack"/*; do
 done
 chmod 0755 "$TUNNEL_DIR/tunnel-client"
 
-installed="$($TUNNEL_DIR/tunnel-client --version)"
+installed="$("${TUNNEL_DIR}/tunnel-client" --version)"
 [[ "$installed" == "${VERSION}"* ]] || { echo "error: installed unexpected version: $installed" >&2; exit 1; }
 echo "tunnel_client_installed=$installed"

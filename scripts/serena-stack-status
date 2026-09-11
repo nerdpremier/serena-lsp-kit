@@ -6,7 +6,7 @@ TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
 HEALTH_PORT="${SERENA_HEALTH_PORT:-18090}"
 
 service="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
-version="$($TUNNEL_DIR/tunnel-client --version 2>/dev/null || echo unavailable)"
+version="$("${TUNNEL_DIR}/tunnel-client" --version 2>/dev/null || echo unavailable)"
 health="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/healthz" 2>/dev/null || echo unavailable)"
 ready="$(curl -fsS --max-time 2 "http://127.0.0.1:${HEALTH_PORT}/readyz" 2>/dev/null || echo unavailable)"
 

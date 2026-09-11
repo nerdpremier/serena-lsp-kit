@@ -15,7 +15,7 @@ LATEST="$BACKUP_BASE/latest"
 BACKUP_DIR="$(readlink -f "$LATEST")"
 [[ -f "$BACKUP_DIR/meta.env" ]] || { echo "error: backup metadata missing" >&2; exit 1; }
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1091
 source "$BACKUP_DIR/meta.env"
 
 [[ -d "$PACKAGE_ROOT" ]] || { echo "error: Serena package root missing: $PACKAGE_ROOT" >&2; exit 1; }
