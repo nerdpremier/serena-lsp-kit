@@ -30,6 +30,7 @@ class MultiMcpConfigTests(unittest.TestCase):
                     "/opt/node/bin/node",
                     "/opt/playwright/node_modules/@playwright/mcp/cli.js",
                     Path("/tmp/pw-out"),
+                    "/opt/ms-playwright/chromium/chrome",
                 ),
                 18092,
             ),
@@ -94,14 +95,32 @@ class MultiMcpConfigTests(unittest.TestCase):
                 self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
 
+    def test_linux_playwright_runs_browser_as_unprivileged_user(self) -> None:
+        cmd = multi.playwright_command(
+            "/opt/node/bin/node",
+            "/opt/playwright/node_modules/@playwright/mcp/cli.js",
+            Path("/opt/artifacts/playwright"),
+            "/opt/ms-playwright/chromium-1243/chrome-linux64/chrome",
+            run_as_user="kali",
+            browsers_path="/opt/ms-playwright",
+        )
+        self.assertTrue(cmd.startswith("/usr/sbin/runuser -u kali -- /usr/bin/env -u CONTROL_PLANE_API_KEY "))
+        self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright", cmd)
+        self.assertIn("--executable-path /opt/ms-playwright/chromium-1243/chrome-linux64/chrome", cmd)
+        self.assertNotIn("--no-sandbox", cmd)
+
     def test_windows_paths_are_safe_for_tunnel_parser(self) -> None:
         cmd = multi.playwright_command(
             r"C:\Program Files\nodejs\node.exe",
             r"C:\ProgramData\McpTunnelKit\playwright\cli.js",
             Path(r"C:\ProgramData\McpTunnelKit\artifacts\playwright"),
+            r"C:\ProgramData\McpTunnelKit\ms-playwright\chromium-1243\chrome-win64\chrome.exe",
         )
         self.assertIn("'C:\\Program Files\\nodejs\\node.exe'", cmd)
         self.assertIn("'C:\\ProgramData\\McpTunnelKit\\playwright\\cli.js'", cmd)
+        self.assertIn("--executable-path", cmd)
+        self.assertIn("chromium-1243", cmd)
+        self.assertNotIn("runuser", cmd)
 
     def test_github_requires_token(self) -> None:
         with self.assertRaises(ValueError):

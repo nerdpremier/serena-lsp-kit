@@ -131,11 +131,28 @@ fi
 NODE_BIN=""
 PLAYWRIGHT_CLI=""
 PLAYWRIGHT_BROWSERS=""
+PLAYWRIGHT_BROWSER=""
+PLAYWRIGHT_USER=""
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
+  command -v runuser >/dev/null 2>&1 || { echo "error: missing required command: runuser" >&2; exit 1; }
+  PLAYWRIGHT_USER="${MCP_PLAYWRIGHT_USER:-${SUDO_USER:-}}"
+  if [[ -z "$PLAYWRIGHT_USER" || "$PLAYWRIGHT_USER" == root ]]; then
+    PLAYWRIGHT_USER="mcp-playwright"
+    if ! id "$PLAYWRIGHT_USER" >/dev/null 2>&1; then
+      command -v useradd >/dev/null 2>&1 || { echo "error: useradd is required when installing Playwright directly as root" >&2; exit 1; }
+      useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$PLAYWRIGHT_USER"
+    fi
+  fi
+  id "$PLAYWRIGHT_USER" >/dev/null 2>&1 || { echo "error: Playwright runtime user does not exist: $PLAYWRIGHT_USER" >&2; exit 1; }
   MCP_KIT_BASE="$BASE_DIR" "$SCRIPT_DIR/scripts/update_node_playwright.sh" >/dev/null
   NODE_BIN="$BASE_DIR/node/bin/node"
   PLAYWRIGHT_CLI="$BASE_DIR/playwright/node_modules/@playwright/mcp/cli.js"
   PLAYWRIGHT_BROWSERS="$BASE_DIR/ms-playwright"
+  PLAYWRIGHT_BROWSER="$(find "$PLAYWRIGHT_BROWSERS" -type f -path '*/chromium-*/*' -name chrome -perm -111 -print -quit)"
+  [[ -x "$PLAYWRIGHT_BROWSER" ]] || { echo "error: installed Playwright Chromium executable not found" >&2; exit 1; }
+  chmod 0755 "$BASE_DIR"
+  PLAYWRIGHT_GROUP="$(id -gn "$PLAYWRIGHT_USER")"
+  install -d -o "$PLAYWRIGHT_USER" -g "$PLAYWRIGHT_GROUP" -m 0750 "$BASE_DIR/artifacts/playwright"
 fi
 
 CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" \
@@ -152,7 +169,8 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" \
     playwright "$PLAYWRIGHT_PROFILE" "$PLAYWRIGHT_ENV" "$PLAYWRIGHT_TUNNEL_ID" --health-port 18092 \
     --node-bin "$NODE_BIN" --playwright-cli "$PLAYWRIGHT_CLI" \
-    --output-dir "$BASE_DIR/artifacts/playwright" --browsers-path "$PLAYWRIGHT_BROWSERS"
+    --output-dir "$BASE_DIR/artifacts/playwright" --browsers-path "$PLAYWRIGHT_BROWSERS" \
+    --browser-executable "$PLAYWRIGHT_BROWSER" --run-as-user "$PLAYWRIGHT_USER"
 fi
 chmod 0600 "$PROFILE_DIR"/*.yaml "$ENV_DIR"/*.env
 

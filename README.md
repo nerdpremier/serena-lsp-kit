@@ -227,9 +227,10 @@ Playwright MCP runs:
 ```text
 --headless
 --isolated
+--executable-path <kit-managed Chromium>
 ```
 
-Browser state is not kept as a persistent user profile. Playwright browser files and MCP output stay under the kit runtime directory.
+Browser state is not kept as a persistent user profile. Playwright browser files and MCP output stay under the kit runtime directory. On Linux, the tunnel remains root-owned but the Playwright MCP/browser child is dropped to the invoking `sudo` user (or a dedicated `mcp-playwright` system user when installed directly as root), so Chromium keeps its sandbox enabled. Set `MCP_PLAYWRIGHT_USER` to choose a different existing Linux runtime user. The Linux child also removes `CONTROL_PLANE_API_KEY` from its environment before starting Playwright.
 
 ## Secret handling
 

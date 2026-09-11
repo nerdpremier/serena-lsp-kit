@@ -73,15 +73,33 @@ def github_command(github_bin: str) -> str:
     return command_line(github_bin, "stdio")
 
 
-def playwright_command(node_bin: str, playwright_cli: str, output_dir: Path) -> str:
-    return command_line(
-        node_bin,
-        playwright_cli,
-        "--headless",
-        "--isolated",
-        "--output-dir",
-        str(output_dir.resolve()),
-    )
+def playwright_command(
+    node_bin: str,
+    playwright_cli: str,
+    output_dir: Path,
+    executable_path: str = "",
+    *,
+    run_as_user: str = "",
+    browsers_path: str = "",
+) -> str:
+    args = [node_bin, playwright_cli, "--headless", "--isolated"]
+    if executable_path:
+        args.extend(["--executable-path", executable_path])
+    args.extend(["--output-dir", str(output_dir.resolve())])
+    if run_as_user:
+        prefix = [
+            "/usr/sbin/runuser",
+            "-u",
+            run_as_user,
+            "--",
+            "/usr/bin/env",
+            "-u",
+            "CONTROL_PLANE_API_KEY",
+        ]
+        if browsers_path:
+            prefix.append(f"PLAYWRIGHT_BROWSERS_PATH={browsers_path}")
+        args = prefix + args
+    return command_line(*args)
 
 
 def render_profile(tunnel_id: str, command: str, health_port: int) -> str:
@@ -166,6 +184,8 @@ def main() -> int:
     p_playwright.add_argument("--playwright-cli", required=True)
     p_playwright.add_argument("--output-dir", type=Path, required=True)
     p_playwright.add_argument("--browsers-path", required=True)
+    p_playwright.add_argument("--browser-executable", required=True)
+    p_playwright.add_argument("--run-as-user", default="")
 
     args = parser.parse_args()
     if args.kind == "serena":
@@ -175,7 +195,14 @@ def main() -> int:
         command = github_command(args.github_bin)
         browsers_path = ""
     else:
-        command = playwright_command(args.node_bin, args.playwright_cli, args.output_dir)
+        command = playwright_command(
+            args.node_bin,
+            args.playwright_cli,
+            args.output_dir,
+            args.browser_executable,
+            run_as_user=args.run_as_user,
+            browsers_path=args.browsers_path,
+        )
         browsers_path = args.browsers_path
 
     create_runtime(

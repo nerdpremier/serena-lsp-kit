@@ -163,6 +163,7 @@ if (-not $SkipGitHub) {
 
 $NodeExe = $null
 $PlaywrightCli = $null
+$PlaywrightBrowser = $null
 if (-not $SkipPlaywright) {
     $nodeAsset = "node-v$NodeVersion-$NodeArch.zip"
     $nodeStage = Join-Path $BaseDir "node-stage"
@@ -181,6 +182,9 @@ if (-not $SkipPlaywright) {
     $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
     & $NodeExe $PlaywrightCoreCli install chromium
     if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium install failed" }
+    $PlaywrightBrowser = Get-ChildItem -LiteralPath $BrowsersDir -Recurse -File -Filter "chrome.exe" |
+        Where-Object { $_.FullName -match '[\\/]chromium-[^\\/]+[\\/]' } | Select-Object -First 1
+    if (-not $PlaywrightBrowser) { throw "Installed Playwright Chromium executable not found" }
 }
 
 $env:CONTROL_PLANE_API_KEY = $ControlKey
@@ -198,7 +202,7 @@ if (-not $SkipGitHub) {
 if (-not $SkipPlaywright) {
     $PlaywrightProfile = Join-Path $ConfigDir "playwright.yaml"
     $PlaywrightEnv = Join-Path $ConfigDir "playwright.env"
-    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") playwright $PlaywrightProfile $PlaywrightEnv $PlaywrightTunnelId --health-port 18092 --node-bin $NodeExe --playwright-cli $PlaywrightCli --output-dir (Join-Path $BaseDir "artifacts\playwright") --browsers-path $BrowsersDir
+    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") playwright $PlaywrightProfile $PlaywrightEnv $PlaywrightTunnelId --health-port 18092 --node-bin $NodeExe --playwright-cli $PlaywrightCli --output-dir (Join-Path $BaseDir "artifacts\playwright") --browsers-path $BrowsersDir --browser-executable $PlaywrightBrowser.FullName
 }
 
 Get-ChildItem -LiteralPath $ConfigDir -File | Where-Object { $_.Extension -in @('.yaml', '.env') } | ForEach-Object { Protect-File $_.FullName }
