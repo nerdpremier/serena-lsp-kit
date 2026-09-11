@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Python syntax
+        run: python -m py_compile scripts/patch_serena.py scripts/configure_runtime.py
+      - name: Shell syntax
+        run: bash -n install.sh rollback.sh scripts/update_tunnel_client.sh scripts/serena-stack-status scripts/rotate-serena-control-plane-key
+      - name: Shellcheck
+        run: shellcheck install.sh rollback.sh scripts/update_tunnel_client.sh scripts/serena-stack-status scripts/rotate-serena-control-plane-key
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
