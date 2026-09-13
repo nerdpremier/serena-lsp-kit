@@ -5,7 +5,9 @@ The patch is deliberately small and idempotent:
 - remove the unconditional JetBrains tool import from ``serena.tools``;
 - make ``propagate_settings`` import the JetBrains plugin client directly;
 - make the JetBrains backend fail clearly instead of requiring tool classes;
-- remove ``jetbrains_tools.py`` after it has been backed up by the caller.
+- remove ``jetbrains_tools.py`` after it has been backed up by the caller;
+- cap ``execute_shell_command`` at 90 seconds and kill the spawned process group
+  on timeout so child processes do not outlive the MCP request.
 
 This module never touches credentials or systemd state.
 """
@@ -67,19 +69,114 @@ def _patch_serena_config(path: Path) -> bool:
     return False
 
 
+def _patch_cmd_tools(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    if "timeout=shell_timeout" in text:
+        return False
+
+    old = "        result = execute_shell_command(command, cwd=_cwd, capture_stderr=capture_stderr)\n"
+    new = (
+        "        shell_timeout = min(float(self.agent.serena_config.tool_timeout), 90.0)\n"
+        "        result = execute_shell_command(\n"
+        "            command,\n"
+        "            cwd=_cwd,\n"
+        "            capture_stderr=capture_stderr,\n"
+        "            timeout=shell_timeout,\n"
+        "        )\n"
+    )
+    if old not in text:
+        raise RuntimeError("Could not find Serena 1.7.0 ExecuteShellCommandTool call")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    return True
+
+
+def _patch_shell(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    original = text
+
+    if "import signal\n" not in text:
+        if "import os\n" not in text:
+            raise RuntimeError("Could not find Serena 1.7.0 shell import block")
+        text = text.replace("import os\n", "import os\nimport signal\n", 1)
+
+    old_signature = (
+        "def execute_shell_command(command: str, cwd: str | None = None, "
+        "capture_stderr: bool = False) -> ShellCommandResult:\n"
+    )
+    new_signature = (
+        "def execute_shell_command(\n"
+        "    command: str,\n"
+        "    cwd: str | None = None,\n"
+        "    capture_stderr: bool = False,\n"
+        "    timeout: float | None = None,\n"
+        ") -> ShellCommandResult:\n"
+    )
+    if old_signature in text:
+        text = text.replace(old_signature, new_signature, 1)
+    elif "timeout: float | None = None" not in text:
+        raise RuntimeError("Could not find Serena 1.7.0 execute_shell_command signature")
+
+    if "start_new_session=os.name != \"nt\"" not in text:
+        old_popen_tail = '        cwd=cwd,\n        **subprocess_kwargs(),\n'
+        new_popen_tail = (
+            '        cwd=cwd,\n'
+            '        start_new_session=os.name != "nt",\n'
+            '        **subprocess_kwargs(),\n'
+        )
+        if old_popen_tail not in text:
+            raise RuntimeError("Could not find Serena 1.7.0 Popen argument block")
+        text = text.replace(old_popen_tail, new_popen_tail, 1)
+
+    old_communicate = (
+        "    stdout, stderr = process.communicate()\n"
+        "    return ShellCommandResult(stdout=stdout, stderr=stderr, "
+        "return_code=process.returncode, cwd=cwd)\n"
+    )
+    new_communicate = (
+        "    try:\n"
+        "        stdout, stderr = process.communicate(timeout=timeout)\n"
+        "        return_code = process.returncode\n"
+        "    except subprocess.TimeoutExpired:\n"
+        "        if os.name == \"nt\":\n"
+        "            process.kill()\n"
+        "        else:\n"
+        "            os.killpg(process.pid, signal.SIGKILL)\n"
+        "        stdout, stderr = process.communicate()\n"
+        "        return_code = 124\n"
+        "        if capture_stderr:\n"
+        "            suffix = f\"Command timed out after {timeout:g} seconds.\"\n"
+        "            stderr = f\"{stderr.rstrip()}\\n{suffix}\" if stderr else suffix\n"
+        "    return ShellCommandResult(stdout=stdout, stderr=stderr, "
+        "return_code=return_code, cwd=cwd)\n"
+    )
+    if old_communicate in text:
+        text = text.replace(old_communicate, new_communicate, 1)
+    elif "except subprocess.TimeoutExpired:" not in text:
+        raise RuntimeError("Could not find Serena 1.7.0 communicate block")
+
+    if text != original:
+        path.write_text(text, encoding="utf-8")
+        return True
+    return False
+
+
 def patch(package_root: Path) -> dict[str, bool]:
     package_root = package_root.resolve()
     tools_init = package_root / "tools" / "__init__.py"
     jetbrains_tools = package_root / "tools" / "jetbrains_tools.py"
     serena_config = package_root / "config" / "serena_config.py"
+    cmd_tools = package_root / "tools" / "cmd_tools.py"
+    shell = package_root / "util" / "shell.py"
 
-    missing = [p for p in (tools_init, serena_config) if not p.is_file()]
+    missing = [p for p in (tools_init, serena_config, cmd_tools, shell) if not p.is_file()]
     if missing:
         raise FileNotFoundError("Missing Serena files: " + ", ".join(map(str, missing)))
 
     result = {
         "tools_init_changed": _patch_tools_init(tools_init),
         "serena_config_changed": _patch_serena_config(serena_config),
+        "cmd_tools_changed": _patch_cmd_tools(cmd_tools),
+        "shell_changed": _patch_shell(shell),
         "jetbrains_tools_removed": False,
     }
     if jetbrains_tools.exists():
