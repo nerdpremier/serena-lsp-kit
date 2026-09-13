@@ -141,12 +141,48 @@ PLAYWRIGHT_USER=""
 PLAYWRIGHT_GUI_ARGS=()
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   command -v runuser >/dev/null 2>&1 || { echo "error: missing required command: runuser" >&2; exit 1; }
+
+  case "${MCP_PLAYWRIGHT_HEADLESS:-0}" in
+    1|true|TRUE|yes|YES|on|ON) PLAYWRIGHT_HEADLESS=true ;;
+    0|false|FALSE|no|NO|off|OFF) PLAYWRIGHT_HEADLESS=false ;;
+    *) echo "error: MCP_PLAYWRIGHT_HEADLESS must be 1/0, true/false, yes/no, or on/off" >&2; exit 1 ;;
+  esac
+
+  active_desktop_user() {
+    local session uid user seat tty active type
+    if command -v loginctl >/dev/null 2>&1; then
+      while read -r session uid user seat tty; do
+        [[ -n "$session" && -n "$user" && "$user" != root ]] || continue
+        active="$(loginctl show-session "$session" -p Active --value 2>/dev/null || true)"
+        type="$(loginctl show-session "$session" -p Type --value 2>/dev/null || true)"
+        if [[ "$active" == yes && ( "$type" == x11 || "$type" == wayland ) ]]; then
+          printf '%s' "$user"
+          return 0
+        fi
+      done < <(loginctl list-sessions --no-legend 2>/dev/null || true)
+    fi
+
+    if command -v who >/dev/null 2>&1; then
+      user="$(who | awk '$0 ~ /\(:[0-9]+(\.[0-9]+)?\)/ {print $1; exit}')"
+      if [[ -n "$user" && "$user" != root ]]; then
+        printf '%s' "$user"
+        return 0
+      fi
+    fi
+    return 1
+  }
+
   PLAYWRIGHT_USER="${MCP_PLAYWRIGHT_USER:-${SUDO_USER:-}}"
   if [[ -z "$PLAYWRIGHT_USER" || "$PLAYWRIGHT_USER" == root ]]; then
-    PLAYWRIGHT_USER="mcp-playwright"
-    if ! id "$PLAYWRIGHT_USER" >/dev/null 2>&1; then
-      command -v useradd >/dev/null 2>&1 || { echo "error: useradd is required when installing Playwright directly as root" >&2; exit 1; }
-      useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$PLAYWRIGHT_USER"
+    if [[ "$PLAYWRIGHT_HEADLESS" == false ]]; then
+      PLAYWRIGHT_USER="$(active_desktop_user || true)"
+    fi
+    if [[ -z "$PLAYWRIGHT_USER" || "$PLAYWRIGHT_USER" == root ]]; then
+      PLAYWRIGHT_USER="mcp-playwright"
+      if ! id "$PLAYWRIGHT_USER" >/dev/null 2>&1; then
+        command -v useradd >/dev/null 2>&1 || { echo "error: useradd is required when installing Playwright directly as root" >&2; exit 1; }
+        useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$PLAYWRIGHT_USER"
+      fi
     fi
   fi
   id "$PLAYWRIGHT_USER" >/dev/null 2>&1 || { echo "error: Playwright runtime user does not exist: $PLAYWRIGHT_USER" >&2; exit 1; }
@@ -159,12 +195,6 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   chmod 0755 "$BASE_DIR"
   PLAYWRIGHT_GROUP="$(id -gn "$PLAYWRIGHT_USER")"
   install -d -o "$PLAYWRIGHT_USER" -g "$PLAYWRIGHT_GROUP" -m 0750 "$BASE_DIR/artifacts/playwright"
-
-  case "${MCP_PLAYWRIGHT_HEADLESS:-0}" in
-    1|true|TRUE|yes|YES|on|ON) PLAYWRIGHT_HEADLESS=true ;;
-    0|false|FALSE|no|NO|off|OFF) PLAYWRIGHT_HEADLESS=false ;;
-    *) echo "error: MCP_PLAYWRIGHT_HEADLESS must be 1/0, true/false, yes/no, or on/off" >&2; exit 1 ;;
-  esac
 
   if [[ "$PLAYWRIGHT_HEADLESS" == false ]]; then
     command -v pgrep >/dev/null 2>&1 || { echo "error: pgrep is required for Playwright GUI mode" >&2; exit 1; }

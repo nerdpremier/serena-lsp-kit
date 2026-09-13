@@ -37,7 +37,7 @@ if [[ ! -x "$NODE_DIR/bin/node" ]] || [[ "$("$NODE_DIR/bin/node" --version 2>/de
 fi
 
 mkdir -p "$PLAYWRIGHT_DIR" "$BROWSERS_DIR"
-"$NODE_DIR/bin/npm" install --prefix "$PLAYWRIGHT_DIR" --omit=dev --no-audit --no-fund \
+PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/npm" install --prefix "$PLAYWRIGHT_DIR" --omit=dev --no-audit --no-fund \
   "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" >/dev/null
 
 PLAYWRIGHT_CLI="$PLAYWRIGHT_DIR/node_modules/@playwright/mcp/cli.js"

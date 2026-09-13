@@ -59,7 +59,7 @@ Secrets are scoped per connector. Serena and Playwright never receive the GitHub
 
 ## Linux
 
-Requirements: Linux with systemd, Python 3.11–3.14, curl, unzip, sha256sum.
+Requirements: Linux with systemd, Python 3.11–3.14, curl, unzip, sha256sum. Node.js/npm do not need to be installed system-wide; the kit installs and pins its own Node runtime for Playwright.
 
 ```bash
  git clone https://github.com/nerdpremier/serena-lsp-kit.git
@@ -230,9 +230,9 @@ Playwright MCP runs:
 --executable-path <browser executable>
 ```
 
-Browser state is not kept as a persistent user profile. On Linux, the kit uses its managed Chromium build; the tunnel remains root-owned but the Playwright MCP/browser child is dropped to the invoking `sudo` user (or a dedicated `mcp-playwright` system user when installed directly as root), so Chromium keeps its sandbox enabled. Set `MCP_PLAYWRIGHT_USER` to choose a different existing Linux runtime user. The Linux child also removes `CONTROL_PLANE_API_KEY` from its environment before starting Playwright.
+Browser state is not kept as a persistent user profile. On Linux, the kit uses its managed Chromium build; the tunnel remains root-owned but the Playwright MCP/browser child is dropped to the invoking `sudo` user. For direct-root GUI installs, bootstrap uses the active desktop user; for direct-root headless installs (or when no desktop user can be found), it falls back to a dedicated `mcp-playwright` system user. This keeps Chromium sandboxing enabled. Set `MCP_PLAYWRIGHT_USER` to choose a different existing Linux runtime user. The Linux child also removes `CONTROL_PLANE_API_KEY` from its environment before starting Playwright.
 
-Linux defaults to GUI/headed mode so you can see the real Chromium window while Playwright works. The bootstrap detects `DISPLAY`/Wayland, `XAUTHORITY`, `XDG_RUNTIME_DIR`, and the desktop D-Bus address from the selected runtime user's session. These can be overridden with `MCP_PLAYWRIGHT_DISPLAY`, `MCP_PLAYWRIGHT_WAYLAND_DISPLAY`, `MCP_PLAYWRIGHT_XAUTHORITY`, `MCP_PLAYWRIGHT_XDG_RUNTIME_DIR`, and `MCP_PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS`. For servers/CI or lower resource usage, explicitly enable headless mode:
+Linux defaults to GUI/headed mode so you can see the real Chromium window while Playwright works. When bootstrap is launched directly as root, it now auto-detects the active X11/Wayland desktop user before falling back to the dedicated `mcp-playwright` account. It then detects `DISPLAY`/Wayland, `XAUTHORITY`, `XDG_RUNTIME_DIR`, and the desktop D-Bus address from that user's session. These can be overridden with `MCP_PLAYWRIGHT_DISPLAY`, `MCP_PLAYWRIGHT_WAYLAND_DISPLAY`, `MCP_PLAYWRIGHT_XAUTHORITY`, `MCP_PLAYWRIGHT_XDG_RUNTIME_DIR`, and `MCP_PLAYWRIGHT_DBUS_SESSION_BUS_ADDRESS`. For servers/CI or lower resource usage, explicitly enable headless mode:
 
 ```bash
 sudo MCP_PLAYWRIGHT_HEADLESS=1 ./bootstrap.sh /absolute/path/to/project
