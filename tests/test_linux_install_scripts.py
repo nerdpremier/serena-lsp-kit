@@ -43,7 +43,7 @@ class LinuxInstallScriptTests(unittest.TestCase):
             bootstrap_script,
         )
         self.assertIn(
-            '"$NODE_BIN" "$NODE_NPM_CLI" install --prefix "$STITCH_MCP_DIR"',
+            '"$NODE_BIN" "$NODE_NPM_CLI" install --loglevel=error --prefix "$STITCH_MCP_DIR"',
             bootstrap_script,
         )
         self.assertNotIn('"$BASE_DIR/node/bin/npm" install', bootstrap_script)
