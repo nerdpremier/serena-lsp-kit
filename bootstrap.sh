@@ -252,7 +252,7 @@ if [[ "$ENABLE_STITCH" == true ]]; then
   install -m 0644 "$SCRIPT_DIR/stitch-mcp/worker.mjs" "$STITCH_MCP_DIR/worker.mjs"
   NODE_NPM_CLI="$BASE_DIR/node/lib/node_modules/npm/bin/npm-cli.js"
   [[ -f "$NODE_NPM_CLI" ]] || { echo "error: managed npm CLI not found: $NODE_NPM_CLI" >&2; exit 1; }
-  "$NODE_BIN" "$NODE_NPM_CLI" install --prefix "$STITCH_MCP_DIR" --omit=dev --no-audit --no-fund >/dev/null
+  "$NODE_BIN" "$NODE_NPM_CLI" install --loglevel=error --prefix "$STITCH_MCP_DIR" --omit=dev --no-audit --no-fund >/dev/null
   STITCH_SERVER="$STITCH_MCP_DIR/server.mjs"
   "$NODE_BIN" --check "$STITCH_SERVER" >/dev/null
   "$NODE_BIN" --check "$STITCH_MCP_DIR/worker.mjs" >/dev/null
