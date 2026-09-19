@@ -11,7 +11,8 @@ $failed = $false
 $connectors = @(
     @{ Name = "serena"; Task = "McpTunnelKit-Serena"; Port = 18090 },
     @{ Name = "github"; Task = "McpTunnelKit-GitHub"; Port = 18091 },
-    @{ Name = "playwright"; Task = "McpTunnelKit-Playwright"; Port = 18092 }
+    @{ Name = "playwright"; Task = "McpTunnelKit-Playwright"; Port = 18092 },
+    @{ Name = "stitch"; Task = "McpTunnelKit-Stitch"; Port = 18093 }
 )
 
 foreach ($connector in $connectors) {
@@ -22,12 +23,8 @@ foreach ($connector in $connectors) {
     }
     $task = Get-ScheduledTask -TaskName $connector.Task
     $taskState = if ($task) { $task.State.ToString().ToLowerInvariant() } else { "missing" }
-    try {
-        $health = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ("http://127.0.0.1:" + $connector.Port + "/healthz")).Content.Trim()
-    } catch { $health = "unavailable" }
-    try {
-        $ready = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ("http://127.0.0.1:" + $connector.Port + "/readyz")).Content.Trim()
-    } catch { $ready = "unavailable" }
+    try { $health = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ("http://127.0.0.1:" + $connector.Port + "/healthz")).Content.Trim() } catch { $health = "unavailable" }
+    try { $ready = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ("http://127.0.0.1:" + $connector.Port + "/readyz")).Content.Trim() } catch { $ready = "unavailable" }
     Write-Output ($connector.Name + "_task=" + $taskState)
     Write-Output ($connector.Name + "_health=" + $health)
     Write-Output ($connector.Name + "_ready=" + $ready)
