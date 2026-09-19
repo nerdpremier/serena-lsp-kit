@@ -33,6 +33,8 @@ if [[ ! -x "$NODE_DIR/bin/node" ]] || [[ "$("$NODE_DIR/bin/node" --version 2>/de
   tar -xJf "$work/$ASSET" -C "$NODE_DIR" --strip-components=1
 fi
 
+NPM_CLI="$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js"
+[[ -f "$NPM_CLI" ]] || { echo "error: managed npm CLI not found: $NPM_CLI" >&2; exit 1; }
 "$NODE_DIR/bin/node" --version >/dev/null
-"$NODE_DIR/bin/npm" --version >/dev/null
+"$NODE_DIR/bin/node" "$NPM_CLI" --version >/dev/null
 printf 'node_bin=%s\n' "$NODE_DIR/bin/node"
