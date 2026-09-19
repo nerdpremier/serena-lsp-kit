@@ -21,9 +21,6 @@ class MultiMcpConfigTests(unittest.TestCase):
             "serena": multi.render_profile(
                 "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", multi.serena_command("/opt/serena/bin/serena", Path("/workspace")), 18090
             ),
-            "github": multi.render_profile(
-                "tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", multi.github_command("/opt/github-mcp/github-mcp-server"), 18091
-            ),
             "playwright": multi.render_profile(
                 "tunnel_cccccccccccccccccccccccccccccccc",
                 multi.playwright_command(
@@ -50,70 +47,52 @@ class MultiMcpConfigTests(unittest.TestCase):
                 self.assertNotIn("channel: github", text)
                 self.assertNotIn("channel: playwright", text)
         self.assertIn("tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", profiles["serena"])
-        self.assertIn("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", profiles["github"])
         self.assertIn("tunnel_cccccccccccccccccccccccccccccccc", profiles["playwright"])
         self.assertIn("tunnel_dddddddddddddddddddddddddddddddd", profiles["stitch"])
 
     def test_secrets_are_scoped_per_connector(self) -> None:
         openai = "fixture-openai-key"
-        github = "fixture-github-token"
         stitch_key = "fixture-stitch-key"
-        serena = multi.render_env("serena", openai, github_token=github, stitch_api_key=stitch_key)
-        github_env = multi.render_env("github", openai, github_token=github, stitch_api_key=stitch_key)
+        serena = multi.render_env("serena", openai, stitch_api_key=stitch_key)
         playwright = multi.render_env(
             "playwright",
             openai,
-            github_token=github,
             stitch_api_key=stitch_key,
             browsers_path="/tmp/browsers",
         )
-        stitch = multi.render_env("stitch", openai, github_token=github, stitch_api_key=stitch_key)
+        stitch = multi.render_env("stitch", openai, stitch_api_key=stitch_key)
         self.assertIn(openai, serena)
-        self.assertNotIn(github, serena)
         self.assertNotIn(stitch_key, serena)
-        self.assertIn(github, github_env)
-        self.assertNotIn(stitch_key, github_env)
-        self.assertNotIn("PLAYWRIGHT_BROWSERS_PATH", github_env)
-        self.assertNotIn(github, playwright)
         self.assertNotIn(stitch_key, playwright)
         self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/tmp/browsers", playwright)
         self.assertIn("STITCH_API_KEY=fixture-stitch-key", stitch)
-        self.assertNotIn(github, stitch)
 
-    def test_runtime_files_do_not_put_secrets_in_yaml(self) -> None:
+    def test_runtime_files_do_not_put_control_key_in_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            profile = root / "github.yaml"
-            env_file = root / "github.env"
+            profile = root / "serena.yaml"
+            env_file = root / "serena.env"
             old_cp = os.environ.get("CONTROL_PLANE_API_KEY")
-            old_gh = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
             try:
                 os.environ["CONTROL_PLANE_API_KEY"] = "fixture-control-key"
-                os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = "fixture-github-token"
                 multi.create_runtime(
                     profile,
                     env_file,
-                    kind="github",
+                    kind="serena",
                     tunnel_id="tunnel_dddddddddddddddddddddddddddddddd",
-                    command=multi.github_command("/opt/github-mcp/github-mcp-server"),
-                    health_port=18091,
+                    command=multi.serena_command("/opt/serena/bin/serena", Path("/workspace")),
+                    health_port=18090,
                 )
             finally:
                 if old_cp is None:
                     os.environ.pop("CONTROL_PLANE_API_KEY", None)
                 else:
                     os.environ["CONTROL_PLANE_API_KEY"] = old_cp
-                if old_gh is None:
-                    os.environ.pop("GITHUB_PERSONAL_ACCESS_TOKEN", None)
-                else:
-                    os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = old_gh
             yaml = profile.read_text(encoding="utf-8")
             env = env_file.read_text(encoding="utf-8")
             self.assertNotIn("fixture-control-key", yaml)
-            self.assertNotIn("fixture-github-token", yaml)
             self.assertIn('api_key: "env:CONTROL_PLANE_API_KEY"', yaml)
             self.assertIn("fixture-control-key", env)
-            self.assertIn("fixture-github-token", env)
             if os.name != "nt":
                 self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
@@ -221,9 +200,9 @@ class MultiMcpConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             multi.render_env("stitch", "fixture-openai", stitch_api_key="")
 
-    def test_github_requires_token(self) -> None:
+    def test_github_runtime_kind_is_not_supported(self) -> None:
         with self.assertRaises(ValueError):
-            multi.render_env("github", "fixture-openai", github_token="")
+            multi.render_env("github", "fixture-openai")
 
 
 if __name__ == "__main__":

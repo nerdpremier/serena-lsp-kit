@@ -3,10 +3,8 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$ProjectPath,
     [string]$SerenaTunnelId = $env:SERENA_TUNNEL_ID,
-    [string]$GitHubTunnelId = $env:GITHUB_TUNNEL_ID,
     [string]$PlaywrightTunnelId = $env:PLAYWRIGHT_TUNNEL_ID,
     [string]$StitchTunnelId = $env:STITCH_TUNNEL_ID,
-    [switch]$SkipGitHub,
     [switch]$SkipPlaywright,
     [switch]$SkipStitch
 )
@@ -14,12 +12,10 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $TunnelVersion = "0.0.14"
-$GitHubMcpVersion = "1.12.1"
 $NodeVersion = "24.21.0"
 $PlaywrightMcpVersion = "0.0.80"
 $BaseDir = "C:\ProgramData\McpTunnelKit"
 $TunnelDir = Join-Path $BaseDir "tunnel-client"
-$GitHubDir = Join-Path $BaseDir "github-mcp"
 $NodeDir = Join-Path $BaseDir "node"
 $PlaywrightDir = Join-Path $BaseDir "playwright"
 $StitchDir = Join-Path $BaseDir "stitch-mcp"
@@ -167,7 +163,6 @@ $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
 if (-not (Test-Path -LiteralPath $ProjectPath -PathType Container)) { throw "Project directory not found: $ProjectPath" }
 
 $SerenaTunnelId = Read-TunnelId $SerenaTunnelId "Serena"
-if (-not $SkipGitHub) { $GitHubTunnelId = Read-TunnelId $GitHubTunnelId "GitHub" }
 if (-not $SkipPlaywright) { $PlaywrightTunnelId = Read-TunnelId $PlaywrightTunnelId "Playwright" }
 if (-not $SkipStitch) { $StitchTunnelId = Read-TunnelId $StitchTunnelId "Stitch" }
 
@@ -175,15 +170,20 @@ $ControlKey = $env:CONTROL_PLANE_API_KEY
 if ([string]::IsNullOrWhiteSpace($ControlKey)) { $ControlKey = Read-SecretText "OpenAI Control Plane API key" }
 if ([string]::IsNullOrWhiteSpace($ControlKey)) { throw "Control Plane API key is required." }
 
-$GitHubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
-if (-not $SkipGitHub -and [string]::IsNullOrWhiteSpace($GitHubToken)) { $GitHubToken = Read-SecretText "GitHub Personal Access Token" }
-if (-not $SkipGitHub -and [string]::IsNullOrWhiteSpace($GitHubToken)) { throw "GitHub token is required unless -SkipGitHub is used." }
-
 $StitchKey = $env:STITCH_API_KEY
 if (-not $SkipStitch -and [string]::IsNullOrWhiteSpace($StitchKey)) { $StitchKey = Read-SecretText "Google Stitch API key" }
 if (-not $SkipStitch -and [string]::IsNullOrWhiteSpace($StitchKey)) { throw "Stitch API key is required unless -SkipStitch is used." }
 
 New-Item -ItemType Directory -Force -Path $BaseDir, $ConfigDir | Out-Null
+
+$legacyGitHubTask = Get-ScheduledTask -TaskName "McpTunnelKit-GitHub" -ErrorAction SilentlyContinue
+if ($legacyGitHubTask) {
+    Stop-ScheduledTask -TaskName "McpTunnelKit-GitHub" -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "McpTunnelKit-GitHub" -Confirm:$false
+}
+Remove-Item -Force (Join-Path $ConfigDir "github.yaml"), (Join-Path $ConfigDir "github.env") -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force (Join-Path $BaseDir "github-mcp") -ErrorAction SilentlyContinue
+if ($legacyGitHubTask) { Write-Host "legacy_github_connector=removed" }
 $uv = Get-Uv
 $SerenaPython = Join-Path $SerenaVenv "Scripts\python.exe"
 $SerenaExe = Join-Path $SerenaVenv "Scripts\serena.exe"
@@ -206,21 +206,14 @@ $PackageRoot = (& $SerenaPython -c "import pathlib,serena; print(pathlib.Path(se
 if ($LASTEXITCODE -ne 0) { throw "Serena LSP-only patch failed" }
 
 if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
-    $TunnelArch = "windows-arm64"; $GitHubArch = "arm64"; $NodeArch = "win-arm64"
+    $TunnelArch = "windows-arm64"; $NodeArch = "win-arm64"
 } else {
-    $TunnelArch = "windows-amd64"; $GitHubArch = "x86_64"; $NodeArch = "win-x64"
+    $TunnelArch = "windows-amd64"; $NodeArch = "win-x64"
 }
 
 $TunnelAsset = "tunnel-client-v$TunnelVersion-$TunnelArch.zip"
 Download-VerifiedZip "https://github.com/openai/tunnel-client/releases/download/v$TunnelVersion/$TunnelAsset" "https://github.com/openai/tunnel-client/releases/download/v$TunnelVersion/SHA256SUMS.txt" $TunnelAsset $TunnelDir
 $TunnelExe = Join-Path $TunnelDir "tunnel-client.exe"
-
-$GitHubExe = $null
-if (-not $SkipGitHub) {
-    $asset = "github-mcp-server_Windows_$GitHubArch.zip"
-    Download-VerifiedZip "https://github.com/github/github-mcp-server/releases/download/v$GitHubMcpVersion/$asset" "https://github.com/github/github-mcp-server/releases/download/v$GitHubMcpVersion/github-mcp-server_$($GitHubMcpVersion)_checksums.txt" $asset $GitHubDir
-    $GitHubExe = Join-Path $GitHubDir "github-mcp-server.exe"
-}
 
 $NodeExe = $null
 $Npm = $null
@@ -267,13 +260,6 @@ $SerenaProfile = Join-Path $ConfigDir "serena.yaml"
 $SerenaEnv = Join-Path $ConfigDir "serena.env"
 & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") serena $SerenaProfile $SerenaEnv $SerenaTunnelId --health-port 18090 $ProjectPath --serena-bin $SerenaExe
 
-if (-not $SkipGitHub) {
-    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $GitHubToken
-    $GitHubProfile = Join-Path $ConfigDir "github.yaml"
-    $GitHubEnv = Join-Path $ConfigDir "github.env"
-    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") github $GitHubProfile $GitHubEnv $GitHubTunnelId --health-port 18091 --github-bin $GitHubExe
-}
-
 if (-not $SkipPlaywright) {
     $PlaywrightProfile = Join-Path $ConfigDir "playwright.yaml"
     $PlaywrightEnv = Join-Path $ConfigDir "playwright.env"
@@ -291,10 +277,6 @@ Get-ChildItem -LiteralPath $ConfigDir -File | Where-Object { $_.Extension -in @(
 
 & $TunnelExe doctor --profile-file $SerenaProfile --health.listen-addr 127.0.0.1:0 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Serena tunnel doctor failed" }
-if (-not $SkipGitHub) {
-    & $TunnelExe doctor --profile-file $GitHubProfile --health.listen-addr 127.0.0.1:0 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "GitHub tunnel doctor failed" }
-}
 if (-not $SkipPlaywright) {
     & $TunnelExe doctor --profile-file $PlaywrightProfile --health.listen-addr 127.0.0.1:0 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Playwright tunnel doctor failed" }
@@ -316,7 +298,6 @@ $legacy = Get-ScheduledTask -TaskName "McpTunnelKit" -ErrorAction SilentlyContin
 if ($legacy) { Stop-ScheduledTask -TaskName "McpTunnelKit" -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName "McpTunnelKit" -Confirm:$false }
 
 Register-ConnectorTask "Serena" "serena" $runScript
-if (-not $SkipGitHub) { Register-ConnectorTask "GitHub" "github" $runScript }
 if (-not $SkipPlaywright) { Register-ConnectorTask "Playwright" "playwright" $runScript }
 if (-not $SkipStitch) { Register-ConnectorTask "Stitch" "stitch" $runScript }
 Start-Sleep -Seconds 5
@@ -325,14 +306,11 @@ Start-Sleep -Seconds 5
 if ($LASTEXITCODE -ne 0) { throw "One or more MCP tunnel tasks failed readiness checks" }
 
 $env:CONTROL_PLANE_API_KEY = $null
-$env:GITHUB_PERSONAL_ACCESS_TOKEN = $null
 $env:PLAYWRIGHT_BROWSERS_PATH = $null
 $env:STITCH_API_KEY = $null
 $ControlKey = $null
-$GitHubToken = $null
 $StitchKey = $null
 $connectors = @("serena")
-if (-not $SkipGitHub) { $connectors += "github" }
 if (-not $SkipPlaywright) { $connectors += "playwright" }
 if (-not $SkipStitch) { $connectors += "stitch" }
 Write-Host "bootstrap=PASS"

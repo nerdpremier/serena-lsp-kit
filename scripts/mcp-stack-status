@@ -16,7 +16,6 @@ echo "tunnel_version=$version"
 failed=0
 for entry in \
   "serena:mcp-serena-tunnel.service:18090" \
-  "github:mcp-github-tunnel.service:18091" \
   "playwright:mcp-playwright-tunnel.service:18092" \
   "stitch:mcp-stitch-tunnel.service:18093"; do
   IFS=: read -r name service port <<< "$entry"

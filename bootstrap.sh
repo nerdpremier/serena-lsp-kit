@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_PATH=""
 SERENA_TUNNEL_ID="${SERENA_TUNNEL_ID:-}"
-GITHUB_TUNNEL_ID="${GITHUB_TUNNEL_ID:-}"
 PLAYWRIGHT_TUNNEL_ID="${PLAYWRIGHT_TUNNEL_ID:-}"
 STITCH_TUNNEL_ID="${STITCH_TUNNEL_ID:-}"
 BASE_DIR="${MCP_KIT_BASE:-/opt/serena-lsp-kit}"
@@ -13,22 +12,17 @@ PROFILE_DIR="${TUNNEL_PROFILE_DIR:-/root/.config/tunnel-client}"
 ENV_DIR="${MCP_ENV_DIR:-/root/.config/mcp-tunnel-kit}"
 SERENA_CONFIG="${SERENA_CONFIG:-/root/.serena/serena_config.yml}"
 SERENA_VENV="${SERENA_VENV:-$BASE_DIR/serena-venv}"
-GITHUB_MCP_DIR="${GITHUB_MCP_DIR:-$BASE_DIR/github-mcp}"
 STITCH_MCP_DIR="${STITCH_MCP_DIR:-$BASE_DIR/stitch-mcp}"
-ENABLE_GITHUB=true
 ENABLE_PLAYWRIGHT=true
 ENABLE_STITCH=true
 
 SERENA_PROFILE="$PROFILE_DIR/serena.yaml"
-GITHUB_PROFILE="$PROFILE_DIR/github.yaml"
 PLAYWRIGHT_PROFILE="$PROFILE_DIR/playwright.yaml"
 STITCH_PROFILE="$PROFILE_DIR/stitch.yaml"
 SERENA_ENV="$ENV_DIR/serena.env"
-GITHUB_ENV="$ENV_DIR/github.env"
 PLAYWRIGHT_ENV="$ENV_DIR/playwright.env"
 STITCH_ENV="$ENV_DIR/stitch.env"
 SERENA_UNIT="/etc/systemd/system/mcp-serena-tunnel.service"
-GITHUB_UNIT="/etc/systemd/system/mcp-github-tunnel.service"
 PLAYWRIGHT_UNIT="/etc/systemd/system/mcp-playwright-tunnel.service"
 STITCH_UNIT="/etc/systemd/system/mcp-stitch-tunnel.service"
 
@@ -36,23 +30,19 @@ usage() {
   cat <<'EOF'
 Usage: sudo ./bootstrap.sh /absolute/path/to/project [options]
 
-Installs four independent OpenAI MCP tunnels/connectors:
+Installs three independent OpenAI MCP tunnels/connectors:
   Serena      tunnel -> channel main -> Serena 1.7.0 (LSP-only)
-  GitHub      tunnel -> channel main -> GitHub MCP Server 1.12.1
   Playwright  tunnel -> channel main -> Playwright MCP 0.0.80
   Stitch      tunnel -> channel main -> Google Stitch MCP
 
 Options:
   --serena-tunnel-id tunnel_...
-  --github-tunnel-id tunnel_...
   --playwright-tunnel-id tunnel_...
   --stitch-tunnel-id tunnel_...
-  --skip-github
   --skip-playwright
   --skip-stitch
 
 CONTROL_PLANE_API_KEY is shared by the installed tunnel processes.
-GITHUB_PERSONAL_ACCESS_TOKEN is injected only into the GitHub MCP tunnel.
 STITCH_API_KEY is injected only into the Stitch MCP tunnel.
 
 Playwright Linux mode:
@@ -65,10 +55,8 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --serena-tunnel-id) [[ $# -ge 2 ]] || exit 2; SERENA_TUNNEL_ID="$2"; shift 2 ;;
-    --github-tunnel-id) [[ $# -ge 2 ]] || exit 2; GITHUB_TUNNEL_ID="$2"; shift 2 ;;
     --playwright-tunnel-id) [[ $# -ge 2 ]] || exit 2; PLAYWRIGHT_TUNNEL_ID="$2"; shift 2 ;;
     --stitch-tunnel-id) [[ $# -ge 2 ]] || exit 2; STITCH_TUNNEL_ID="$2"; shift 2 ;;
-    --skip-github) ENABLE_GITHUB=false; shift ;;
     --skip-playwright) ENABLE_PLAYWRIGHT=false; shift ;;
     --skip-stitch) ENABLE_STITCH=false; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -97,7 +85,6 @@ prompt_tunnel() {
 }
 
 prompt_tunnel SERENA_TUNNEL_ID Serena
-[[ "$ENABLE_GITHUB" == true ]] && prompt_tunnel GITHUB_TUNNEL_ID GitHub
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && prompt_tunnel PLAYWRIGHT_TUNNEL_ID Playwright
 [[ "$ENABLE_STITCH" == true ]] && prompt_tunnel STITCH_TUNNEL_ID Stitch
 
@@ -108,13 +95,6 @@ if [[ -z "$CONTROL_KEY" ]]; then
 fi
 [[ -n "$CONTROL_KEY" ]] || { echo "error: Control Plane API key is required" >&2; exit 1; }
 
-GITHUB_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
-if [[ "$ENABLE_GITHUB" == true && -z "$GITHUB_TOKEN" ]]; then
-  read -r -s -p "GitHub Personal Access Token: " GITHUB_TOKEN
-  echo
-fi
-[[ "$ENABLE_GITHUB" == false || -n "$GITHUB_TOKEN" ]] || { echo "error: GitHub token is required" >&2; exit 1; }
-
 STITCH_KEY="${STITCH_API_KEY:-}"
 if [[ "$ENABLE_STITCH" == true && -z "$STITCH_KEY" ]]; then
   read -r -s -p "Google Stitch API key: " STITCH_KEY
@@ -124,6 +104,24 @@ fi
 
 mkdir -p "$BASE_DIR" "$PROFILE_DIR" "$ENV_DIR"
 chmod 0700 "$BASE_DIR" "$ENV_DIR"
+
+remove_legacy_github_connector() {
+  local removed=false
+  if systemctl cat mcp-github-tunnel.service >/dev/null 2>&1; then
+    systemctl disable --now mcp-github-tunnel.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/mcp-github-tunnel.service
+    removed=true
+  fi
+  for path in "$PROFILE_DIR/github.yaml" "$ENV_DIR/github.env"; do
+    if [[ -e "$path" ]]; then rm -f "$path"; removed=true; fi
+  done
+  if [[ -d "$BASE_DIR/github-mcp" ]]; then rm -rf "$BASE_DIR/github-mcp"; removed=true; fi
+  if [[ "$removed" == true ]]; then
+    systemctl daemon-reload
+    echo "legacy_github_connector=removed"
+  fi
+}
+remove_legacy_github_connector
 
 SERENA_BIN="${SERENA_BIN:-$(command -v serena || true)}"
 if [[ -n "$SERENA_BIN" && -x "$SERENA_BIN" ]] && [[ "$($SERENA_BIN --version 2>/dev/null || true)" == "Serena 1.7.0" ]]; then
@@ -146,12 +144,6 @@ TUNNEL_VERSION_FILE="/usr/local/share/mcp-tunnel-kit/tunnel-client.version"
 install -d -m 0755 "$(dirname "$TUNNEL_VERSION_FILE")"
 "$TUNNEL_DIR/tunnel-client" --version >"$TUNNEL_VERSION_FILE"
 chmod 0644 "$TUNNEL_VERSION_FILE"
-
-GITHUB_BIN=""
-if [[ "$ENABLE_GITHUB" == true ]]; then
-  GITHUB_MCP_DIR="$GITHUB_MCP_DIR" bash "$SCRIPT_DIR/scripts/update_github_mcp.sh"
-  GITHUB_BIN="$GITHUB_MCP_DIR/github-mcp-server"
-fi
 
 NODE_BIN=""
 PLAYWRIGHT_CLI=""
@@ -259,7 +251,6 @@ if [[ "$ENABLE_STITCH" == true ]]; then
 fi
 
 CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" serena "$SERENA_PROFILE" "$SERENA_ENV" "$SERENA_TUNNEL_ID" --health-port 18090 "$PROJECT_PATH" --serena-bin "$SERENA_BIN"
-if [[ "$ENABLE_GITHUB" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" github "$GITHUB_PROFILE" "$GITHUB_ENV" "$GITHUB_TUNNEL_ID" --health-port 18091 --github-bin "$GITHUB_BIN"; fi
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" playwright "$PLAYWRIGHT_PROFILE" "$PLAYWRIGHT_ENV" "$PLAYWRIGHT_TUNNEL_ID" --health-port 18092 --node-bin "$NODE_BIN" --playwright-cli "$PLAYWRIGHT_CLI" --output-dir "$BASE_DIR/artifacts/playwright" --browsers-path "$PLAYWRIGHT_BROWSERS" --browser-executable "$PLAYWRIGHT_BROWSER" --run-as-user "$PLAYWRIGHT_USER" "${PLAYWRIGHT_GUI_ARGS[@]}"
 fi
@@ -290,12 +281,10 @@ EOF
   chmod 0600 "$unit"
 }
 write_unit "$SERENA_UNIT" "OpenAI MCP Tunnel - Serena" "$SERENA_ENV" "$SERENA_PROFILE"
-[[ "$ENABLE_GITHUB" == true ]] && write_unit "$GITHUB_UNIT" "OpenAI MCP Tunnel - GitHub" "$GITHUB_ENV" "$GITHUB_PROFILE"
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && write_unit "$PLAYWRIGHT_UNIT" "OpenAI MCP Tunnel - Playwright" "$PLAYWRIGHT_ENV" "$PLAYWRIGHT_PROFILE"
 [[ "$ENABLE_STITCH" == true ]] && write_unit "$STITCH_UNIT" "OpenAI MCP Tunnel - Stitch" "$STITCH_ENV" "$STITCH_PROFILE"
 
 CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$SERENA_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null
-if [[ "$ENABLE_GITHUB" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$GITHUB_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null; fi
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$PLAYWRIGHT_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null; fi
 if [[ "$ENABLE_STITCH" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" STITCH_API_KEY="$STITCH_KEY" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$STITCH_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null; fi
 echo "tunnel_doctor=PASS"
@@ -305,16 +294,14 @@ SERENA_BIN="$SERENA_BIN" SERENA_PYTHON="$SERENA_PYTHON" TUNNEL_DIR="$TUNNEL_DIR"
 
 systemctl daemon-reload
 systemctl enable mcp-serena-tunnel.service >/dev/null
-[[ "$ENABLE_GITHUB" == true ]] && systemctl enable --now mcp-github-tunnel.service >/dev/null
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && systemctl enable --now mcp-playwright-tunnel.service >/dev/null
 [[ "$ENABLE_STITCH" == true ]] && systemctl enable --now mcp-stitch-tunnel.service >/dev/null
 sleep 2
 install -m 0755 "$SCRIPT_DIR/scripts/mcp-stack-status" /usr/local/sbin/mcp-stack-status
-unset CONTROL_KEY GITHUB_TOKEN STITCH_KEY CONTROL_PLANE_API_KEY GITHUB_PERSONAL_ACCESS_TOKEN STITCH_API_KEY || true
+unset CONTROL_KEY STITCH_KEY CONTROL_PLANE_API_KEY STITCH_API_KEY || true
 /usr/local/sbin/mcp-stack-status
 echo "bootstrap=PASS"
 connectors=(serena)
-[[ "$ENABLE_GITHUB" == true ]] && connectors+=(github)
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && connectors+=(playwright)
 [[ "$ENABLE_STITCH" == true ]] && connectors+=(stitch)
 (IFS=,; echo "connectors=${connectors[*]}")

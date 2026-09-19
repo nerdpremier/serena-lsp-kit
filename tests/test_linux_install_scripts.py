@@ -62,7 +62,6 @@ class LinuxInstallScriptTests(unittest.TestCase):
 
         for helper in (
             "scripts/update_tunnel_client.sh",
-            "scripts/update_github_mcp.sh",
             "scripts/update_node_playwright.sh",
             "scripts/update_node.sh",
             "install.sh",
@@ -70,6 +69,17 @@ class LinuxInstallScriptTests(unittest.TestCase):
             self.assertIn(f'bash "$SCRIPT_DIR/{helper}"', script)
         self.assertIn('bash "$SCRIPT_DIR/update_node.sh"', playwright_script)
         self.assertNotEqual(BOOTSTRAP.stat().st_mode & 0o100, 0)
+
+    def test_bootstrap_removes_legacy_github_connector(self) -> None:
+        script = BOOTSTRAP.read_text(encoding="utf-8")
+        self.assertIn("remove_legacy_github_connector", script)
+        self.assertIn("systemctl disable --now mcp-github-tunnel.service", script)
+        self.assertIn('"$PROFILE_DIR/github.yaml"', script)
+        self.assertIn('"$ENV_DIR/github.env"', script)
+        self.assertIn('"$BASE_DIR/github-mcp"', script)
+        self.assertNotIn("GITHUB_TUNNEL_ID", script)
+        self.assertNotIn("GITHUB_PERSONAL_ACCESS_TOKEN", script)
+        self.assertNotIn("--skip-github", script)
 
     def test_root_gui_install_auto_detects_active_desktop_user(self) -> None:
         script = BOOTSTRAP.read_text(encoding="utf-8")
