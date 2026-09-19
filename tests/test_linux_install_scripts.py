@@ -56,6 +56,21 @@ class LinuxInstallScriptTests(unittest.TestCase):
             bootstrap_script,
         )
 
+    def test_bootstrap_does_not_depend_on_helper_execute_bits(self) -> None:
+        script = BOOTSTRAP.read_text(encoding="utf-8")
+        playwright_script = UPDATE_PLAYWRIGHT.read_text(encoding="utf-8")
+
+        for helper in (
+            "scripts/update_tunnel_client.sh",
+            "scripts/update_github_mcp.sh",
+            "scripts/update_node_playwright.sh",
+            "scripts/update_node.sh",
+            "install.sh",
+        ):
+            self.assertIn(f'bash "$SCRIPT_DIR/{helper}"', script)
+        self.assertIn('bash "$SCRIPT_DIR/update_node.sh"', playwright_script)
+        self.assertNotEqual(BOOTSTRAP.stat().st_mode & 0o100, 0)
+
     def test_root_gui_install_auto_detects_active_desktop_user(self) -> None:
         script = BOOTSTRAP.read_text(encoding="utf-8")
         self.assertIn("active_desktop_user()", script)

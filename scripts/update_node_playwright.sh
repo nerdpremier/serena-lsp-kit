@@ -9,7 +9,7 @@ BROWSERS_DIR="$BASE_DIR/ms-playwright"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 [[ "$(id -u)" -eq 0 ]] || { echo "error: run as root" >&2; exit 1; }
-MCP_KIT_BASE="$BASE_DIR" "$SCRIPT_DIR/update_node.sh" >/dev/null
+MCP_KIT_BASE="$BASE_DIR" bash "$SCRIPT_DIR/update_node.sh" >/dev/null
 
 mkdir -p "$PLAYWRIGHT_DIR" "$BROWSERS_DIR"
 NPM_CLI="$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js"

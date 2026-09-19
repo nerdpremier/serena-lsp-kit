@@ -141,7 +141,7 @@ SERENA_PYTHON="${SERENA_PYTHON#\#!}"
 if [[ ! -f "$SERENA_CONFIG" ]]; then HOME=/root "$SERENA_BIN" init -b LSP; fi
 if [[ ! -f "$PROJECT_PATH/.serena/project.yml" ]]; then HOME=/root "$SERENA_BIN" project create "$PROJECT_PATH"; fi
 
-TUNNEL_DIR="$TUNNEL_DIR" "$SCRIPT_DIR/scripts/update_tunnel_client.sh"
+TUNNEL_DIR="$TUNNEL_DIR" bash "$SCRIPT_DIR/scripts/update_tunnel_client.sh"
 TUNNEL_VERSION_FILE="/usr/local/share/mcp-tunnel-kit/tunnel-client.version"
 install -d -m 0755 "$(dirname "$TUNNEL_VERSION_FILE")"
 "$TUNNEL_DIR/tunnel-client" --version >"$TUNNEL_VERSION_FILE"
@@ -149,7 +149,7 @@ chmod 0644 "$TUNNEL_VERSION_FILE"
 
 GITHUB_BIN=""
 if [[ "$ENABLE_GITHUB" == true ]]; then
-  GITHUB_MCP_DIR="$GITHUB_MCP_DIR" "$SCRIPT_DIR/scripts/update_github_mcp.sh"
+  GITHUB_MCP_DIR="$GITHUB_MCP_DIR" bash "$SCRIPT_DIR/scripts/update_github_mcp.sh"
   GITHUB_BIN="$GITHUB_MCP_DIR/github-mcp-server"
 fi
 
@@ -194,7 +194,7 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
     fi
   fi
   id "$PLAYWRIGHT_USER" >/dev/null 2>&1 || { echo "error: Playwright runtime user does not exist: $PLAYWRIGHT_USER" >&2; exit 1; }
-  MCP_KIT_BASE="$BASE_DIR" "$SCRIPT_DIR/scripts/update_node_playwright.sh" >/dev/null
+  MCP_KIT_BASE="$BASE_DIR" bash "$SCRIPT_DIR/scripts/update_node_playwright.sh" >/dev/null
   NODE_BIN="$BASE_DIR/node/bin/node"
   PLAYWRIGHT_CLI="$BASE_DIR/playwright/node_modules/@playwright/mcp/cli.js"
   PLAYWRIGHT_BROWSERS="$BASE_DIR/ms-playwright"
@@ -241,7 +241,7 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
 fi
 
 if [[ "$ENABLE_STITCH" == true && -z "$NODE_BIN" ]]; then
-  MCP_KIT_BASE="$BASE_DIR" "$SCRIPT_DIR/scripts/update_node.sh" >/dev/null
+  MCP_KIT_BASE="$BASE_DIR" bash "$SCRIPT_DIR/scripts/update_node.sh" >/dev/null
   NODE_BIN="$BASE_DIR/node/bin/node"
 fi
 STITCH_SERVER=""
@@ -301,7 +301,7 @@ if [[ "$ENABLE_STITCH" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" STI
 echo "tunnel_doctor=PASS"
 
 if systemctl cat serena-tunnel.service >/dev/null 2>&1; then systemctl disable --now serena-tunnel.service >/dev/null 2>&1 || true; echo "legacy_bundle_service=disabled"; fi
-SERENA_BIN="$SERENA_BIN" SERENA_PYTHON="$SERENA_PYTHON" TUNNEL_DIR="$TUNNEL_DIR" TUNNEL_PROFILE="$SERENA_PROFILE" TUNNEL_ENV="$SERENA_ENV" SYSTEMD_UNIT="$SERENA_UNIT" SERENA_CONFIG="$SERENA_CONFIG" SERENA_SERVICE="mcp-serena-tunnel.service" SERENA_HEALTH_PORT=18090 "$SCRIPT_DIR/install.sh" "$PROJECT_PATH" --skip-tunnel-update --restart
+SERENA_BIN="$SERENA_BIN" SERENA_PYTHON="$SERENA_PYTHON" TUNNEL_DIR="$TUNNEL_DIR" TUNNEL_PROFILE="$SERENA_PROFILE" TUNNEL_ENV="$SERENA_ENV" SYSTEMD_UNIT="$SERENA_UNIT" SERENA_CONFIG="$SERENA_CONFIG" SERENA_SERVICE="mcp-serena-tunnel.service" SERENA_HEALTH_PORT=18090 bash "$SCRIPT_DIR/install.sh" "$PROJECT_PATH" --skip-tunnel-update --restart
 
 systemctl daemon-reload
 systemctl enable mcp-serena-tunnel.service >/dev/null
