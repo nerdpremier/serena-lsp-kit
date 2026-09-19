@@ -17,12 +17,36 @@ class LinuxInstallScriptTests(unittest.TestCase):
         subprocess.run(["bash", "-n", str(UPDATE_PLAYWRIGHT)], check=True)
 
     def test_managed_node_is_used_when_running_npm(self) -> None:
-        script = UPDATE_PLAYWRIGHT.read_text(encoding="utf-8")
+        node_script = UPDATE_NODE.read_text(encoding="utf-8")
+        playwright_script = UPDATE_PLAYWRIGHT.read_text(encoding="utf-8")
+        bootstrap_script = BOOTSTRAP.read_text(encoding="utf-8")
+
         self.assertIn(
-            'PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/npm" install',
-            script,
+            'NPM_CLI="$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js"',
+            node_script,
         )
-        self.assertIn('"$SCRIPT_DIR/update_node.sh"', script)
+        self.assertIn(
+            '"$NODE_DIR/bin/node" "$NPM_CLI" --version',
+            node_script,
+        )
+        self.assertNotIn('"$NODE_DIR/bin/npm" --version', node_script)
+
+        self.assertIn(
+            '"$NODE_DIR/bin/node" "$NPM_CLI" install',
+            playwright_script,
+        )
+        self.assertNotIn('"$NODE_DIR/bin/npm" install', playwright_script)
+        self.assertIn('"$SCRIPT_DIR/update_node.sh"', playwright_script)
+
+        self.assertIn(
+            'NODE_NPM_CLI="$BASE_DIR/node/lib/node_modules/npm/bin/npm-cli.js"',
+            bootstrap_script,
+        )
+        self.assertIn(
+            '"$NODE_BIN" "$NODE_NPM_CLI" install --prefix "$STITCH_MCP_DIR"',
+            bootstrap_script,
+        )
+        self.assertNotIn('"$BASE_DIR/node/bin/npm" install', bootstrap_script)
 
     def test_root_gui_install_auto_detects_active_desktop_user(self) -> None:
         script = BOOTSTRAP.read_text(encoding="utf-8")
