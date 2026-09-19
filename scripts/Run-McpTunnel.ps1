@@ -1,7 +1,7 @@
 param(
     [string]$BaseDir = "C:\ProgramData\McpTunnelKit",
     [Parameter(Mandatory = $true)]
-    [ValidateSet("serena", "github", "playwright")]
+    [ValidateSet("serena", "github", "playwright", "stitch")]
     [string]$Connector
 )
 

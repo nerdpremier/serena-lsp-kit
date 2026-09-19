@@ -17,11 +17,11 @@ failed=0
 for entry in \
   "serena:mcp-serena-tunnel.service:18090" \
   "github:mcp-github-tunnel.service:18091" \
-  "playwright:mcp-playwright-tunnel.service:18092"; do
+  "playwright:mcp-playwright-tunnel.service:18092" \
+  "stitch:mcp-stitch-tunnel.service:18093"; do
   IFS=: read -r name service port <<< "$entry"
   state="$(systemctl is-active "$service" 2>/dev/null || true)"
   if [[ "$state" == "unknown" || "$state" == "inactive" || "$state" == "failed" ]]; then
-    # Optional connector may not have been installed.
     if ! systemctl cat "$service" >/dev/null 2>&1; then
       echo "${name}_service=not-installed"
       continue
@@ -32,9 +32,7 @@ for entry in \
   echo "${name}_service=$state"
   echo "${name}_health=$health"
   echo "${name}_ready=$ready"
-  if [[ "$state" != "active" || "$health" != "live" || "$ready" != "ready" ]]; then
-    failed=1
-  fi
+  if [[ "$state" != "active" || "$health" != "live" || "$ready" != "ready" ]]; then failed=1; fi
 done
 
 tunnels="$(ps -eo comm= | awk '$1=="tunnel-client" {n++} END {print n+0}')"
