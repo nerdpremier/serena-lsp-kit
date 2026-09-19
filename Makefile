@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 PY_SCRIPTS := scripts/patch_serena.py scripts/configure_runtime.py scripts/multi_mcp_config.py
 SH_SCRIPTS := bootstrap.sh install.sh rollback.sh \
-	scripts/update_tunnel_client.sh scripts/update_github_mcp.sh scripts/update_node_playwright.sh \
+	scripts/update_tunnel_client.sh scripts/update_github_mcp.sh scripts/update_node.sh scripts/update_node_playwright.sh \
 	scripts/serena-stack-status scripts/mcp-stack-status scripts/rotate-serena-control-plane-key
 
 .PHONY: test syntax
