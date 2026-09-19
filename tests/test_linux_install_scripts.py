@@ -47,6 +47,14 @@ class LinuxInstallScriptTests(unittest.TestCase):
             bootstrap_script,
         )
         self.assertNotIn('"$BASE_DIR/node/bin/npm" install', bootstrap_script)
+        self.assertIn(
+            '"$NODE_DIR/bin/node" "$NPM_CLI" install --loglevel=error',
+            playwright_script,
+        )
+        self.assertIn(
+            '"$NODE_BIN" "$NODE_NPM_CLI" install --loglevel=error',
+            bootstrap_script,
+        )
 
     def test_root_gui_install_auto_detects_active_desktop_user(self) -> None:
         script = BOOTSTRAP.read_text(encoding="utf-8")
