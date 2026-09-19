@@ -240,7 +240,7 @@ $PlaywrightCli = $null
 $PlaywrightBrowser = $null
 if (-not $SkipPlaywright) {
     New-Item -ItemType Directory -Force -Path $PlaywrightDir, $BrowsersDir | Out-Null
-    & $Npm install --prefix $PlaywrightDir --omit=dev --no-audit --no-fund "@playwright/mcp@$PlaywrightMcpVersion"
+    & $Npm install --loglevel=error --prefix $PlaywrightDir --omit=dev --no-audit --no-fund "@playwright/mcp@$PlaywrightMcpVersion"
     if ($LASTEXITCODE -ne 0) { throw "Playwright MCP npm install failed" }
     $PlaywrightCli = Join-Path $PlaywrightDir "node_modules\@playwright\mcp\cli.js"
     $PlaywrightBrowser = Install-GoogleChromeStable
@@ -253,7 +253,7 @@ if (-not $SkipStitch) {
     Copy-Item -Force (Join-Path $PSScriptRoot "stitch-mcp\package.json") (Join-Path $StitchDir "package.json")
     Copy-Item -Force (Join-Path $PSScriptRoot "stitch-mcp\server.mjs") (Join-Path $StitchDir "server.mjs")
     Copy-Item -Force (Join-Path $PSScriptRoot "stitch-mcp\worker.mjs") (Join-Path $StitchDir "worker.mjs")
-    & $Npm install --prefix $StitchDir --omit=dev --no-audit --no-fund
+    & $Npm install --loglevel=error --prefix $StitchDir --omit=dev --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) { throw "Stitch MCP npm install failed" }
     $StitchServer = Join-Path $StitchDir "server.mjs"
     & $NodeExe --check $StitchServer
