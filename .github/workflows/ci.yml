@@ -70,7 +70,8 @@ jobs:
             'Google.Chrome',
             'googlechromestandaloneenterprise64.msi',
             'Get-AuthenticodeSignature',
-            '--browser-executable $PlaywrightBrowser'
+            '--browser-executable $PlaywrightBrowser',
+            '--loglevel=error'
           )
           foreach ($needle in $required) {
             if (-not $bootstrap.Contains($needle)) { throw "Missing Windows Chrome bootstrap contract: $needle" }
