@@ -167,9 +167,9 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
     *) echo "error: MCP_PLAYWRIGHT_HEADLESS must be 1/0, true/false, yes/no, or on/off" >&2; exit 1 ;;
   esac
   active_desktop_user() {
-    local session uid user seat tty active type
+    local session user active type
     if command -v loginctl >/dev/null 2>&1; then
-      while read -r session uid user seat tty; do
+      while read -r session _ user _ _; do
         [[ -n "$session" && -n "$user" && "$user" != root ]] || continue
         active="$(loginctl show-session "$session" -p Active --value 2>/dev/null || true)"
         type="$(loginctl show-session "$session" -p Type --value 2>/dev/null || true)"
