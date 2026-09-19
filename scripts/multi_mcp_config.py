@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate isolated tunnel-client profiles for Serena, GitHub and Playwright MCP."""
+"""Generate isolated tunnel-client profiles for Serena, GitHub, Playwright and Stitch MCP."""
 
 from __future__ import annotations
 
@@ -73,6 +73,10 @@ def github_command(github_bin: str) -> str:
     return command_line(github_bin, "stdio")
 
 
+def stitch_command(node_bin: str, stitch_server: str, project: Path) -> str:
+    return command_line(node_bin, stitch_server, "--workspace", str(project.resolve()))
+
+
 def playwright_command(
     node_bin: str,
     playwright_cli: str,
@@ -143,7 +147,14 @@ def render_profile(tunnel_id: str, command: str, health_port: int) -> str:
     )
 
 
-def render_env(kind: str, control_plane_key: str, *, github_token: str = "", browsers_path: str = "") -> str:
+def render_env(
+    kind: str,
+    control_plane_key: str,
+    *,
+    github_token: str = "",
+    stitch_api_key: str = "",
+    browsers_path: str = "",
+) -> str:
     validate_secret("CONTROL_PLANE_API_KEY", control_plane_key)
     lines = [f"CONTROL_PLANE_API_KEY={control_plane_key}"]
     if kind == "github":
@@ -155,6 +166,9 @@ def render_env(kind: str, control_plane_key: str, *, github_token: str = "", bro
                 "GITHUB_LOCKDOWN_MODE=1",
             ]
         )
+    elif kind == "stitch":
+        validate_secret("STITCH_API_KEY", stitch_api_key)
+        lines.append(f"STITCH_API_KEY={stitch_api_key}")
     elif kind == "playwright" and browsers_path:
         validate_secret("PLAYWRIGHT_BROWSERS_PATH", browsers_path)
         lines.append(f"PLAYWRIGHT_BROWSERS_PATH={browsers_path}")
@@ -166,10 +180,17 @@ def render_env(kind: str, control_plane_key: str, *, github_token: str = "", bro
 def create_runtime(profile: Path, env_file: Path, *, kind: str, tunnel_id: str, command: str, health_port: int, browsers_path: str = "") -> None:
     control_key = os.environ.get("CONTROL_PLANE_API_KEY", "")
     github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    stitch_api_key = os.environ.get("STITCH_API_KEY", "")
     _atomic_write(profile, render_profile(tunnel_id, command, health_port), 0o600)
     _atomic_write(
         env_file,
-        render_env(kind, control_key, github_token=github_token, browsers_path=browsers_path),
+        render_env(
+            kind,
+            control_key,
+            github_token=github_token,
+            stitch_api_key=stitch_api_key,
+            browsers_path=browsers_path,
+        ),
         0o600,
     )
 
@@ -193,6 +214,12 @@ def main() -> int:
     common(p_github)
     p_github.add_argument("--github-bin", required=True)
 
+    p_stitch = sub.add_parser("stitch")
+    common(p_stitch)
+    p_stitch.add_argument("project", type=Path)
+    p_stitch.add_argument("--node-bin", required=True)
+    p_stitch.add_argument("--stitch-server", required=True)
+
     p_playwright = sub.add_parser("playwright")
     common(p_playwright)
     p_playwright.add_argument("--node-bin", required=True)
@@ -214,6 +241,9 @@ def main() -> int:
         browsers_path = ""
     elif args.kind == "github":
         command = github_command(args.github_bin)
+        browsers_path = ""
+    elif args.kind == "stitch":
+        command = stitch_command(args.node_bin, args.stitch_server, args.project)
         browsers_path = ""
     else:
         command = playwright_command(
