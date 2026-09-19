@@ -14,7 +14,7 @@ MCP_KIT_BASE="$BASE_DIR" "$SCRIPT_DIR/update_node.sh" >/dev/null
 mkdir -p "$PLAYWRIGHT_DIR" "$BROWSERS_DIR"
 NPM_CLI="$NODE_DIR/lib/node_modules/npm/bin/npm-cli.js"
 [[ -f "$NPM_CLI" ]] || { echo "error: managed npm CLI not found: $NPM_CLI" >&2; exit 1; }
-"$NODE_DIR/bin/node" "$NPM_CLI" install --prefix "$PLAYWRIGHT_DIR" --omit=dev --no-audit --no-fund \
+"$NODE_DIR/bin/node" "$NPM_CLI" install --loglevel=error --prefix "$PLAYWRIGHT_DIR" --omit=dev --no-audit --no-fund \
   "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" >/dev/null
 
 PLAYWRIGHT_CLI="$PLAYWRIGHT_DIR/node_modules/@playwright/mcp/cli.js"
