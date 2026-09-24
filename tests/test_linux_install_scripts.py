@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = ROOT / "bootstrap.sh"
 UPDATE_NODE = ROOT / "scripts" / "update_node.sh"
+UPDATE_UV = ROOT / "scripts" / "update_uv.sh"
 UPDATE_PLAYWRIGHT = ROOT / "scripts" / "update_node_playwright.sh"
 
 
@@ -14,7 +15,17 @@ class LinuxInstallScriptTests(unittest.TestCase):
     def test_shell_scripts_parse(self) -> None:
         subprocess.run(["bash", "-n", str(BOOTSTRAP)], check=True)
         subprocess.run(["bash", "-n", str(UPDATE_NODE)], check=True)
+        subprocess.run(["bash", "-n", str(UPDATE_UV)], check=True)
         subprocess.run(["bash", "-n", str(UPDATE_PLAYWRIGHT)], check=True)
+
+    def test_managed_uv_is_pinned_and_added_to_serena_path(self) -> None:
+        uv_script = UPDATE_UV.read_text(encoding="utf-8")
+        bootstrap_script = BOOTSTRAP.read_text(encoding="utf-8")
+
+        self.assertIn('UV_VERSION="${UV_VERSION:-0.12.18}"', uv_script)
+        self.assertIn('"uv==$UV_VERSION"', uv_script)
+        self.assertIn('bash "$SCRIPT_DIR/scripts/update_uv.sh"', bootstrap_script)
+        self.assertIn('Environment="PATH=$UV_BIN_DIR:/root/.local/bin:', bootstrap_script)
 
     def test_managed_node_is_used_when_running_npm(self) -> None:
         node_script = UPDATE_NODE.read_text(encoding="utf-8")
@@ -50,6 +61,7 @@ class LinuxInstallScriptTests(unittest.TestCase):
 
         for helper in (
             "scripts/update_tunnel_client.sh",
+            "scripts/update_uv.sh",
             "scripts/update_node_playwright.sh",
             "install.sh",
         ):

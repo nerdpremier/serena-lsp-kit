@@ -51,7 +51,7 @@ Project source     Chromium
 
 ## Linux
 
-Requirements: Linux with systemd, Python 3.11–3.14, curl, unzip, and sha256sum. Node.js/npm do not need to be installed system-wide; the kit installs and pins its own Node runtime for Playwright.
+Requirements: Linux with systemd, Python 3.11–3.14, curl, unzip, and sha256sum. Node.js/npm and uv/uvx do not need to be installed system-wide; the kit installs managed runtimes for Playwright and Serena LSP. uv/uvx defaults to 0.12.18.
 
 ```bash
 git clone https://github.com/nerdpremier/serena-lsp-kit.git

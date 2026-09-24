@@ -149,6 +149,7 @@ mcp:
     _atomic_write(env_path, f"CONTROL_PLANE_API_KEY={control_plane_api_key}\n", 0o600)
 
     tunnel_client = (tunnel_dir / "tunnel-client").resolve()
+    uv_bin_dir = Path(os.environ.get("MCP_KIT_BASE", "/opt/serena-lsp-kit")) / "uv" / "bin"
     unit = f'''[Unit]
 Description=Serena MCP Tunnel
 After=network-online.target
@@ -158,7 +159,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory={tunnel_dir.resolve()}
-Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH={uv_bin_dir}:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EnvironmentFile={env_path.resolve()}
 ExecStart={tunnel_client} run --profile chatgpt-mcp
 Restart=always

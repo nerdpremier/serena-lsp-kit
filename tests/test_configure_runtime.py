@@ -84,6 +84,7 @@ class ConfigureRuntimeTests(unittest.TestCase):
             self.assertNotIn(secret, unit_text)
             self.assertIn(f"EnvironmentFile={env.resolve()}", unit_text)
             self.assertIn(f"WorkingDirectory={tunnel_dir.resolve()}", unit_text)
+            self.assertIn("PATH=/opt/serena-lsp-kit/uv/bin:/root/.local/bin:", unit_text)
             self.assertIn("/opt/serena/bin/serena start-mcp-server", profile_text)
             self.assertEqual(env.read_text(encoding="utf-8"), f"CONTROL_PLANE_API_KEY={secret}\n")
             self.assertEqual(profile.stat().st_mode & 0o777, 0o600)

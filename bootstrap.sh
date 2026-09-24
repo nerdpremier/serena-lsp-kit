@@ -6,6 +6,8 @@ PROJECT_PATH=""
 SERENA_TUNNEL_ID="${SERENA_TUNNEL_ID:-}"
 PLAYWRIGHT_TUNNEL_ID="${PLAYWRIGHT_TUNNEL_ID:-}"
 BASE_DIR="${MCP_KIT_BASE:-/opt/serena-lsp-kit}"
+UV_DIR="${UV_DIR:-$BASE_DIR/uv}"
+UV_BIN_DIR="$UV_DIR/bin"
 TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
 PROFILE_DIR="${TUNNEL_PROFILE_DIR:-/root/.config/tunnel-client}"
 ENV_DIR="${MCP_ENV_DIR:-/root/.config/mcp-tunnel-kit}"
@@ -84,6 +86,8 @@ fi
 
 mkdir -p "$BASE_DIR" "$PROFILE_DIR" "$ENV_DIR"
 chmod 0700 "$BASE_DIR" "$ENV_DIR"
+UV_DIR="$UV_DIR" MCP_KIT_BASE="$BASE_DIR" bash "$SCRIPT_DIR/scripts/update_uv.sh"
+export PATH="$UV_BIN_DIR:$PATH"
 
 remove_legacy_github_connector() {
   local removed=false
@@ -230,7 +234,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=$TUNNEL_DIR
-Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=$UV_BIN_DIR:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EnvironmentFile=$env_file
 ExecStart=$TUNNEL_DIR/tunnel-client run --profile-file $profile
 Restart=always
