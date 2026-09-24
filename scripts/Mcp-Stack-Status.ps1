@@ -10,8 +10,7 @@ Write-Output "tunnel_version=$version"
 $failed = $false
 $connectors = @(
     @{ Name = "serena"; Task = "McpTunnelKit-Serena"; Port = 18090 },
-    @{ Name = "playwright"; Task = "McpTunnelKit-Playwright"; Port = 18092 },
-    @{ Name = "stitch"; Task = "McpTunnelKit-Stitch"; Port = 18093 }
+    @{ Name = "playwright"; Task = "McpTunnelKit-Playwright"; Port = 18092 }
 )
 
 foreach ($connector in $connectors) {

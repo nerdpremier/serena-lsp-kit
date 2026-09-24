@@ -36,7 +36,6 @@ check_endpoint() {
 entries=()
 [[ -f "$SPLIT_ENV_DIR/serena.env" ]] && entries+=("serena:$SPLIT_ENV_DIR/serena.env:mcp-serena-tunnel.service:18090")
 [[ -f "$SPLIT_ENV_DIR/playwright.env" ]] && entries+=("playwright:$SPLIT_ENV_DIR/playwright.env:mcp-playwright-tunnel.service:18092")
-[[ -f "$SPLIT_ENV_DIR/stitch.env" ]] && entries+=("stitch:$SPLIT_ENV_DIR/stitch.env:mcp-stitch-tunnel.service:18093")
 
 if [[ ${#entries[@]} -eq 0 ]]; then
   [[ -f "$legacy_env" ]] || { echo "error: no MCP tunnel environment files found" >&2; exit 1; }

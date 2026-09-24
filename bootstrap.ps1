@@ -4,9 +4,7 @@ param(
     [string]$ProjectPath,
     [string]$SerenaTunnelId = $env:SERENA_TUNNEL_ID,
     [string]$PlaywrightTunnelId = $env:PLAYWRIGHT_TUNNEL_ID,
-    [string]$StitchTunnelId = $env:STITCH_TUNNEL_ID,
-    [switch]$SkipPlaywright,
-    [switch]$SkipStitch
+    [switch]$SkipPlaywright
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +16,6 @@ $BaseDir = "C:\ProgramData\McpTunnelKit"
 $TunnelDir = Join-Path $BaseDir "tunnel-client"
 $NodeDir = Join-Path $BaseDir "node"
 $PlaywrightDir = Join-Path $BaseDir "playwright"
-$StitchDir = Join-Path $BaseDir "stitch-mcp"
 $BrowsersDir = Join-Path $BaseDir "ms-playwright"
 $SerenaVenv = Join-Path $BaseDir "serena-venv"
 $ConfigDir = Join-Path $BaseDir "config"
@@ -164,15 +161,10 @@ if (-not (Test-Path -LiteralPath $ProjectPath -PathType Container)) { throw "Pro
 
 $SerenaTunnelId = Read-TunnelId $SerenaTunnelId "Serena"
 if (-not $SkipPlaywright) { $PlaywrightTunnelId = Read-TunnelId $PlaywrightTunnelId "Playwright" }
-if (-not $SkipStitch) { $StitchTunnelId = Read-TunnelId $StitchTunnelId "Stitch" }
 
 $ControlKey = $env:CONTROL_PLANE_API_KEY
 if ([string]::IsNullOrWhiteSpace($ControlKey)) { $ControlKey = Read-SecretText "OpenAI Control Plane API key" }
 if ([string]::IsNullOrWhiteSpace($ControlKey)) { throw "Control Plane API key is required." }
-
-$StitchKey = $env:STITCH_API_KEY
-if (-not $SkipStitch -and [string]::IsNullOrWhiteSpace($StitchKey)) { $StitchKey = Read-SecretText "Google Stitch API key" }
-if (-not $SkipStitch -and [string]::IsNullOrWhiteSpace($StitchKey)) { throw "Stitch API key is required unless -SkipStitch is used." }
 
 New-Item -ItemType Directory -Force -Path $BaseDir, $ConfigDir | Out-Null
 
@@ -217,7 +209,7 @@ $TunnelExe = Join-Path $TunnelDir "tunnel-client.exe"
 
 $NodeExe = $null
 $Npm = $null
-if (-not $SkipPlaywright -or -not $SkipStitch) {
+if (-not $SkipPlaywright) {
     $nodeAsset = "node-v$NodeVersion-$NodeArch.zip"
     $nodeStage = Join-Path $BaseDir "node-stage"
     Download-VerifiedZip "https://nodejs.org/dist/v$NodeVersion/$nodeAsset" "https://nodejs.org/dist/v$NodeVersion/SHASUMS256.txt" $nodeAsset $nodeStage
@@ -240,20 +232,6 @@ if (-not $SkipPlaywright) {
     Write-Host "playwright_browser=$PlaywrightBrowser"
 }
 
-$StitchServer = $null
-if (-not $SkipStitch) {
-    New-Item -ItemType Directory -Force -Path $StitchDir | Out-Null
-    Copy-Item -Force (Join-Path $PSScriptRoot "stitch-mcp\package.json") (Join-Path $StitchDir "package.json")
-    Copy-Item -Force (Join-Path $PSScriptRoot "stitch-mcp\server.mjs") (Join-Path $StitchDir "server.mjs")
-    Copy-Item -Force (Join-Path $PSScriptRoot "stitch-mcp\worker.mjs") (Join-Path $StitchDir "worker.mjs")
-    & $Npm install --loglevel=error --prefix $StitchDir --omit=dev --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw "Stitch MCP npm install failed" }
-    $StitchServer = Join-Path $StitchDir "server.mjs"
-    & $NodeExe --check $StitchServer
-    if ($LASTEXITCODE -ne 0) { throw "Stitch MCP server syntax check failed" }
-    & $NodeExe --check (Join-Path $StitchDir "worker.mjs")
-    if ($LASTEXITCODE -ne 0) { throw "Stitch MCP worker syntax check failed" }
-}
 
 $env:CONTROL_PLANE_API_KEY = $ControlKey
 $SerenaProfile = Join-Path $ConfigDir "serena.yaml"
@@ -266,13 +244,6 @@ if (-not $SkipPlaywright) {
     & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") playwright $PlaywrightProfile $PlaywrightEnv $PlaywrightTunnelId --health-port 18092 --node-bin $NodeExe --playwright-cli $PlaywrightCli --output-dir (Join-Path $BaseDir "artifacts\playwright") --browsers-path $BrowsersDir --browser-executable $PlaywrightBrowser
 }
 
-if (-not $SkipStitch) {
-    $env:STITCH_API_KEY = $StitchKey
-    $StitchProfile = Join-Path $ConfigDir "stitch.yaml"
-    $StitchEnv = Join-Path $ConfigDir "stitch.env"
-    & $SerenaPython (Join-Path $PSScriptRoot "scripts\multi_mcp_config.py") stitch $StitchProfile $StitchEnv $StitchTunnelId --health-port 18093 $ProjectPath --node-bin $NodeExe --stitch-server $StitchServer
-}
-
 Get-ChildItem -LiteralPath $ConfigDir -File | Where-Object { $_.Extension -in @('.yaml', '.env') } | ForEach-Object { Protect-File $_.FullName }
 
 & $TunnelExe doctor --profile-file $SerenaProfile --health.listen-addr 127.0.0.1:0 | Out-Null
@@ -280,10 +251,6 @@ if ($LASTEXITCODE -ne 0) { throw "Serena tunnel doctor failed" }
 if (-not $SkipPlaywright) {
     & $TunnelExe doctor --profile-file $PlaywrightProfile --health.listen-addr 127.0.0.1:0 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Playwright tunnel doctor failed" }
-}
-if (-not $SkipStitch) {
-    & $TunnelExe doctor --profile-file $StitchProfile --health.listen-addr 127.0.0.1:0 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Stitch tunnel doctor failed" }
 }
 Write-Host "tunnel_doctor=PASS"
 
@@ -299,7 +266,6 @@ if ($legacy) { Stop-ScheduledTask -TaskName "McpTunnelKit" -ErrorAction Silently
 
 Register-ConnectorTask "Serena" "serena" $runScript
 if (-not $SkipPlaywright) { Register-ConnectorTask "Playwright" "playwright" $runScript }
-if (-not $SkipStitch) { Register-ConnectorTask "Stitch" "stitch" $runScript }
 Start-Sleep -Seconds 5
 
 & (Join-Path $ScriptsDir "Mcp-Stack-Status.ps1") -BaseDir $BaseDir
@@ -307,11 +273,8 @@ if ($LASTEXITCODE -ne 0) { throw "One or more MCP tunnel tasks failed readiness 
 
 $env:CONTROL_PLANE_API_KEY = $null
 $env:PLAYWRIGHT_BROWSERS_PATH = $null
-$env:STITCH_API_KEY = $null
 $ControlKey = $null
-$StitchKey = $null
 $connectors = @("serena")
 if (-not $SkipPlaywright) { $connectors += "playwright" }
-if (-not $SkipStitch) { $connectors += "stitch" }
 Write-Host "bootstrap=PASS"
 Write-Host ("connectors=" + ($connectors -join ","))

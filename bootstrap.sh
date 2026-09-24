@@ -5,45 +5,35 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_PATH=""
 SERENA_TUNNEL_ID="${SERENA_TUNNEL_ID:-}"
 PLAYWRIGHT_TUNNEL_ID="${PLAYWRIGHT_TUNNEL_ID:-}"
-STITCH_TUNNEL_ID="${STITCH_TUNNEL_ID:-}"
 BASE_DIR="${MCP_KIT_BASE:-/opt/serena-lsp-kit}"
 TUNNEL_DIR="${TUNNEL_DIR:-/root/mcp-workspace/tunnel-client}"
 PROFILE_DIR="${TUNNEL_PROFILE_DIR:-/root/.config/tunnel-client}"
 ENV_DIR="${MCP_ENV_DIR:-/root/.config/mcp-tunnel-kit}"
 SERENA_CONFIG="${SERENA_CONFIG:-/root/.serena/serena_config.yml}"
 SERENA_VENV="${SERENA_VENV:-$BASE_DIR/serena-venv}"
-STITCH_MCP_DIR="${STITCH_MCP_DIR:-$BASE_DIR/stitch-mcp}"
 ENABLE_PLAYWRIGHT=true
-ENABLE_STITCH=true
 
 SERENA_PROFILE="$PROFILE_DIR/serena.yaml"
 PLAYWRIGHT_PROFILE="$PROFILE_DIR/playwright.yaml"
-STITCH_PROFILE="$PROFILE_DIR/stitch.yaml"
 SERENA_ENV="$ENV_DIR/serena.env"
 PLAYWRIGHT_ENV="$ENV_DIR/playwright.env"
-STITCH_ENV="$ENV_DIR/stitch.env"
 SERENA_UNIT="/etc/systemd/system/mcp-serena-tunnel.service"
 PLAYWRIGHT_UNIT="/etc/systemd/system/mcp-playwright-tunnel.service"
-STITCH_UNIT="/etc/systemd/system/mcp-stitch-tunnel.service"
 
 usage() {
   cat <<'EOF'
 Usage: sudo ./bootstrap.sh /absolute/path/to/project [options]
 
-Installs three independent OpenAI MCP tunnels/connectors:
+Installs two independent OpenAI MCP tunnels/connectors:
   Serena      tunnel -> channel main -> Serena 1.7.0 (LSP-only)
   Playwright  tunnel -> channel main -> Playwright MCP 0.0.80
-  Stitch      tunnel -> channel main -> Google Stitch MCP
 
 Options:
   --serena-tunnel-id tunnel_...
   --playwright-tunnel-id tunnel_...
-  --stitch-tunnel-id tunnel_...
   --skip-playwright
-  --skip-stitch
 
 CONTROL_PLANE_API_KEY is shared by the installed tunnel processes.
-STITCH_API_KEY is injected only into the Stitch MCP tunnel.
 
 Playwright Linux mode:
   MCP_PLAYWRIGHT_HEADLESS=0   Show Chromium on the active desktop session (default)
@@ -56,9 +46,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --serena-tunnel-id) [[ $# -ge 2 ]] || exit 2; SERENA_TUNNEL_ID="$2"; shift 2 ;;
     --playwright-tunnel-id) [[ $# -ge 2 ]] || exit 2; PLAYWRIGHT_TUNNEL_ID="$2"; shift 2 ;;
-    --stitch-tunnel-id) [[ $# -ge 2 ]] || exit 2; STITCH_TUNNEL_ID="$2"; shift 2 ;;
     --skip-playwright) ENABLE_PLAYWRIGHT=false; shift ;;
-    --skip-stitch) ENABLE_STITCH=false; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "error: unknown option: $1" >&2; usage; exit 2 ;;
     *) [[ -z "$PROJECT_PATH" ]] || { echo "error: only one project path is supported" >&2; exit 2; }; PROJECT_PATH="$1"; shift ;;
@@ -86,7 +74,6 @@ prompt_tunnel() {
 
 prompt_tunnel SERENA_TUNNEL_ID Serena
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && prompt_tunnel PLAYWRIGHT_TUNNEL_ID Playwright
-[[ "$ENABLE_STITCH" == true ]] && prompt_tunnel STITCH_TUNNEL_ID Stitch
 
 CONTROL_KEY="${CONTROL_PLANE_API_KEY:-}"
 if [[ -z "$CONTROL_KEY" ]]; then
@@ -94,13 +81,6 @@ if [[ -z "$CONTROL_KEY" ]]; then
   echo
 fi
 [[ -n "$CONTROL_KEY" ]] || { echo "error: Control Plane API key is required" >&2; exit 1; }
-
-STITCH_KEY="${STITCH_API_KEY:-}"
-if [[ "$ENABLE_STITCH" == true && -z "$STITCH_KEY" ]]; then
-  read -r -s -p "Google Stitch API key: " STITCH_KEY
-  echo
-fi
-[[ "$ENABLE_STITCH" == false || -n "$STITCH_KEY" ]] || { echo "error: Stitch API key is required" >&2; exit 1; }
 
 mkdir -p "$BASE_DIR" "$PROFILE_DIR" "$ENV_DIR"
 chmod 0700 "$BASE_DIR" "$ENV_DIR"
@@ -232,29 +212,10 @@ if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   fi
 fi
 
-if [[ "$ENABLE_STITCH" == true && -z "$NODE_BIN" ]]; then
-  MCP_KIT_BASE="$BASE_DIR" bash "$SCRIPT_DIR/scripts/update_node.sh" >/dev/null
-  NODE_BIN="$BASE_DIR/node/bin/node"
-fi
-STITCH_SERVER=""
-if [[ "$ENABLE_STITCH" == true ]]; then
-  install -d -m 0755 "$STITCH_MCP_DIR"
-  install -m 0644 "$SCRIPT_DIR/stitch-mcp/package.json" "$STITCH_MCP_DIR/package.json"
-  install -m 0644 "$SCRIPT_DIR/stitch-mcp/server.mjs" "$STITCH_MCP_DIR/server.mjs"
-  install -m 0644 "$SCRIPT_DIR/stitch-mcp/worker.mjs" "$STITCH_MCP_DIR/worker.mjs"
-  NODE_NPM_CLI="$BASE_DIR/node/lib/node_modules/npm/bin/npm-cli.js"
-  [[ -f "$NODE_NPM_CLI" ]] || { echo "error: managed npm CLI not found: $NODE_NPM_CLI" >&2; exit 1; }
-  "$NODE_BIN" "$NODE_NPM_CLI" install --loglevel=error --prefix "$STITCH_MCP_DIR" --omit=dev --no-audit --no-fund >/dev/null
-  STITCH_SERVER="$STITCH_MCP_DIR/server.mjs"
-  "$NODE_BIN" --check "$STITCH_SERVER" >/dev/null
-  "$NODE_BIN" --check "$STITCH_MCP_DIR/worker.mjs" >/dev/null
-fi
-
 CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" serena "$SERENA_PROFILE" "$SERENA_ENV" "$SERENA_TUNNEL_ID" --health-port 18090 "$PROJECT_PATH" --serena-bin "$SERENA_BIN"
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then
   CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" playwright "$PLAYWRIGHT_PROFILE" "$PLAYWRIGHT_ENV" "$PLAYWRIGHT_TUNNEL_ID" --health-port 18092 --node-bin "$NODE_BIN" --playwright-cli "$PLAYWRIGHT_CLI" --output-dir "$BASE_DIR/artifacts/playwright" --browsers-path "$PLAYWRIGHT_BROWSERS" --browser-executable "$PLAYWRIGHT_BROWSER" --run-as-user "$PLAYWRIGHT_USER" "${PLAYWRIGHT_GUI_ARGS[@]}"
 fi
-if [[ "$ENABLE_STITCH" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" STITCH_API_KEY="$STITCH_KEY" "$SERENA_PYTHON" "$SCRIPT_DIR/scripts/multi_mcp_config.py" stitch "$STITCH_PROFILE" "$STITCH_ENV" "$STITCH_TUNNEL_ID" --health-port 18093 "$PROJECT_PATH" --node-bin "$NODE_BIN" --stitch-server "$STITCH_SERVER"; fi
 chmod 0600 "$PROFILE_DIR"/*.yaml "$ENV_DIR"/*.env
 
 write_unit() {
@@ -282,11 +243,9 @@ EOF
 }
 write_unit "$SERENA_UNIT" "OpenAI MCP Tunnel - Serena" "$SERENA_ENV" "$SERENA_PROFILE"
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && write_unit "$PLAYWRIGHT_UNIT" "OpenAI MCP Tunnel - Playwright" "$PLAYWRIGHT_ENV" "$PLAYWRIGHT_PROFILE"
-[[ "$ENABLE_STITCH" == true ]] && write_unit "$STITCH_UNIT" "OpenAI MCP Tunnel - Stitch" "$STITCH_ENV" "$STITCH_PROFILE"
 
 CONTROL_PLANE_API_KEY="$CONTROL_KEY" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$SERENA_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null
 if [[ "$ENABLE_PLAYWRIGHT" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$PLAYWRIGHT_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null; fi
-if [[ "$ENABLE_STITCH" == true ]]; then CONTROL_PLANE_API_KEY="$CONTROL_KEY" STITCH_API_KEY="$STITCH_KEY" "$TUNNEL_DIR/tunnel-client" doctor --profile-file "$STITCH_PROFILE" --health.listen-addr 127.0.0.1:0 >/dev/null; fi
 echo "tunnel_doctor=PASS"
 
 if systemctl cat serena-tunnel.service >/dev/null 2>&1; then systemctl disable --now serena-tunnel.service >/dev/null 2>&1 || true; echo "legacy_bundle_service=disabled"; fi
@@ -295,13 +254,11 @@ SERENA_BIN="$SERENA_BIN" SERENA_PYTHON="$SERENA_PYTHON" TUNNEL_DIR="$TUNNEL_DIR"
 systemctl daemon-reload
 systemctl enable mcp-serena-tunnel.service >/dev/null
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && systemctl enable --now mcp-playwright-tunnel.service >/dev/null
-[[ "$ENABLE_STITCH" == true ]] && systemctl enable --now mcp-stitch-tunnel.service >/dev/null
 sleep 2
 install -m 0755 "$SCRIPT_DIR/scripts/mcp-stack-status" /usr/local/sbin/mcp-stack-status
-unset CONTROL_KEY STITCH_KEY CONTROL_PLANE_API_KEY STITCH_API_KEY || true
+unset CONTROL_KEY CONTROL_PLANE_API_KEY || true
 /usr/local/sbin/mcp-stack-status
 echo "bootstrap=PASS"
 connectors=(serena)
 [[ "$ENABLE_PLAYWRIGHT" == true ]] && connectors+=(playwright)
-[[ "$ENABLE_STITCH" == true ]] && connectors+=(stitch)
 (IFS=,; echo "connectors=${connectors[*]}")

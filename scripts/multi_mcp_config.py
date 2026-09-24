@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate isolated tunnel-client profiles for Serena, Playwright and Stitch MCP."""
+"""Generate isolated tunnel-client profiles for Serena and Playwright MCP."""
 
 from __future__ import annotations
 
@@ -65,10 +65,6 @@ def serena_command(serena_bin: str, project: Path) -> str:
         "--project",
         str(project.resolve()),
     )
-
-
-def stitch_command(node_bin: str, stitch_server: str, project: Path) -> str:
-    return command_line(node_bin, stitch_server, "--workspace", str(project.resolve()))
 
 
 def playwright_command(
@@ -145,15 +141,11 @@ def render_env(
     kind: str,
     control_plane_key: str,
     *,
-    stitch_api_key: str = "",
     browsers_path: str = "",
 ) -> str:
     validate_secret("CONTROL_PLANE_API_KEY", control_plane_key)
     lines = [f"CONTROL_PLANE_API_KEY={control_plane_key}"]
-    if kind == "stitch":
-        validate_secret("STITCH_API_KEY", stitch_api_key)
-        lines.append(f"STITCH_API_KEY={stitch_api_key}")
-    elif kind == "playwright" and browsers_path:
+    if kind == "playwright" and browsers_path:
         validate_secret("PLAYWRIGHT_BROWSERS_PATH", browsers_path)
         lines.append(f"PLAYWRIGHT_BROWSERS_PATH={browsers_path}")
     elif kind not in {"serena", "playwright"}:
@@ -163,16 +155,10 @@ def render_env(
 
 def create_runtime(profile: Path, env_file: Path, *, kind: str, tunnel_id: str, command: str, health_port: int, browsers_path: str = "") -> None:
     control_key = os.environ.get("CONTROL_PLANE_API_KEY", "")
-    stitch_api_key = os.environ.get("STITCH_API_KEY", "")
     _atomic_write(profile, render_profile(tunnel_id, command, health_port), 0o600)
     _atomic_write(
         env_file,
-        render_env(
-            kind,
-            control_key,
-            stitch_api_key=stitch_api_key,
-            browsers_path=browsers_path,
-        ),
+        render_env(kind, control_key, browsers_path=browsers_path),
         0o600,
     )
 
@@ -192,12 +178,6 @@ def main() -> int:
     p_serena.add_argument("project", type=Path)
     p_serena.add_argument("--serena-bin", required=True)
 
-    p_stitch = sub.add_parser("stitch")
-    common(p_stitch)
-    p_stitch.add_argument("project", type=Path)
-    p_stitch.add_argument("--node-bin", required=True)
-    p_stitch.add_argument("--stitch-server", required=True)
-
     p_playwright = sub.add_parser("playwright")
     common(p_playwright)
     p_playwright.add_argument("--node-bin", required=True)
@@ -216,9 +196,6 @@ def main() -> int:
     args = parser.parse_args()
     if args.kind == "serena":
         command = serena_command(args.serena_bin, args.project)
-        browsers_path = ""
-    elif args.kind == "stitch":
-        command = stitch_command(args.node_bin, args.stitch_server, args.project)
         browsers_path = ""
     else:
         command = playwright_command(

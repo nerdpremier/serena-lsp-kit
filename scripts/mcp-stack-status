@@ -16,8 +16,7 @@ echo "tunnel_version=$version"
 failed=0
 for entry in \
   "serena:mcp-serena-tunnel.service:18090" \
-  "playwright:mcp-playwright-tunnel.service:18092" \
-  "stitch:mcp-stitch-tunnel.service:18093"; do
+  "playwright:mcp-playwright-tunnel.service:18092"; do
   IFS=: read -r name service port <<< "$entry"
   state="$(systemctl is-active "$service" 2>/dev/null || true)"
   if [[ "$state" == "unknown" || "$state" == "inactive" || "$state" == "failed" ]]; then

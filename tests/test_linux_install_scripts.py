@@ -38,22 +38,10 @@ class LinuxInstallScriptTests(unittest.TestCase):
         self.assertNotIn('"$NODE_DIR/bin/npm" install', playwright_script)
         self.assertIn('"$SCRIPT_DIR/update_node.sh"', playwright_script)
 
-        self.assertIn(
-            'NODE_NPM_CLI="$BASE_DIR/node/lib/node_modules/npm/bin/npm-cli.js"',
-            bootstrap_script,
-        )
-        self.assertIn(
-            '"$NODE_BIN" "$NODE_NPM_CLI" install --loglevel=error --prefix "$STITCH_MCP_DIR"',
-            bootstrap_script,
-        )
         self.assertNotIn('"$BASE_DIR/node/bin/npm" install', bootstrap_script)
         self.assertIn(
             '"$NODE_DIR/bin/node" "$NPM_CLI" install --loglevel=error',
             playwright_script,
-        )
-        self.assertIn(
-            '"$NODE_BIN" "$NODE_NPM_CLI" install --loglevel=error',
-            bootstrap_script,
         )
 
     def test_bootstrap_does_not_depend_on_helper_execute_bits(self) -> None:
@@ -63,7 +51,6 @@ class LinuxInstallScriptTests(unittest.TestCase):
         for helper in (
             "scripts/update_tunnel_client.sh",
             "scripts/update_node_playwright.sh",
-            "scripts/update_node.sh",
             "install.sh",
         ):
             self.assertIn(f'bash "$SCRIPT_DIR/{helper}"', script)
@@ -88,15 +75,6 @@ class LinuxInstallScriptTests(unittest.TestCase):
         self.assertIn('if [[ "$PLAYWRIGHT_HEADLESS" == false ]]; then', script)
         self.assertIn('PLAYWRIGHT_USER="$(active_desktop_user || true)"', script)
         self.assertIn('PLAYWRIGHT_USER="mcp-playwright"', script)
-
-    def test_stitch_bootstrap_is_isolated_and_optional(self) -> None:
-        script = BOOTSTRAP.read_text(encoding="utf-8")
-        self.assertIn('STITCH_TUNNEL_ID="${STITCH_TUNNEL_ID:-}"', script)
-        self.assertIn('--skip-stitch', script)
-        self.assertIn('STITCH_API_KEY="$STITCH_KEY"', script)
-        self.assertIn('mcp-stitch-tunnel.service', script)
-        self.assertIn('--health-port 18093', script)
-        self.assertIn('stitch-mcp/server.mjs', script)
 
 
 if __name__ == "__main__":

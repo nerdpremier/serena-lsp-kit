@@ -1,12 +1,11 @@
 # serena-lsp-kit
 
-Cross-platform installer for exposing three MCP servers to OpenAI as **three independent connectors**:
+Cross-platform installer for exposing two MCP servers to OpenAI as **two independent connectors**:
 
 | Connector | Tunnel | MCP on `main` | Default health port |
 |---|---|---|---:|
 | Serena | Tunnel ID #1 | Serena 1.7.0, LSP-only | 18090 |
 | Playwright | Tunnel ID #2 | Playwright MCP 0.0.80 | 18092 |
-| Stitch | Tunnel ID #3 | Google Stitch MCP | 18093 |
 
 Each MCP gets its own tunnel and exposes only `channel: main`.
 
@@ -14,12 +13,11 @@ GitHub access is intentionally outside this kit. Use ChatGPT's official GitHub c
 
 ## What you need
 
-Create three OpenAI tunnel IDs. `tunnel-client 0.0.14` expects `tunnel_` followed by 32 lowercase letters/digits:
+Create two OpenAI tunnel IDs. `tunnel-client 0.0.14` expects `tunnel_` followed by 32 lowercase letters/digits:
 
 ```text
 SERENA_TUNNEL_ID=tunnel_...
 PLAYWRIGHT_TUNNEL_ID=tunnel_...
-STITCH_TUNNEL_ID=tunnel_...
 ```
 
 The installed tunnel processes can share one OpenAI Control Plane API key:
@@ -28,11 +26,7 @@ The installed tunnel processes can share one OpenAI Control Plane API key:
 CONTROL_PLANE_API_KEY=...
 ```
 
-Playwright needs no additional API key. Stitch needs a Google Stitch API key:
-
-```text
-STITCH_API_KEY=...
-```
+Playwright needs no additional API key.
 
 Canonical OpenAI setup pages reported by tunnel-client:
 
@@ -44,22 +38,20 @@ Canonical OpenAI setup pages reported by tunnel-client:
 
 ```text
 ChatGPT / OpenAI
-   |                 |                  |
-   v                 v                  v
-Serena tunnel     Playwright tunnel    Stitch tunnel
-   | main            | main             | main
-   v                 v                  v
-Serena MCP        Playwright MCP      Stitch MCP
-   |                 |                  |
-   v                 v                  v
-Project source     Chromium         Google Stitch
+   |                 |
+   v                 v
+Serena tunnel     Playwright tunnel
+   | main            | main
+   v                 v
+Serena MCP        Playwright MCP
+   |                 |
+   v                 v
+Project source     Chromium
 ```
-
-Secrets are scoped per connector. Only Stitch receives `STITCH_API_KEY`.
 
 ## Linux
 
-Requirements: Linux with systemd, Python 3.11–3.14, curl, unzip, and sha256sum. Node.js/npm do not need to be installed system-wide; the kit installs and pins its own Node runtime for Playwright and Stitch.
+Requirements: Linux with systemd, Python 3.11–3.14, curl, unzip, and sha256sum. Node.js/npm do not need to be installed system-wide; the kit installs and pins its own Node runtime for Playwright.
 
 ```bash
 git clone https://github.com/nerdpremier/serena-lsp-kit.git
@@ -71,9 +63,7 @@ The installer prompts for:
 
 1. Serena Tunnel ID
 2. Playwright Tunnel ID
-3. Stitch Tunnel ID
-4. OpenAI Control Plane API key
-5. Google Stitch API key
+3. OpenAI Control Plane API key
 
 Non-interactive provisioning:
 
@@ -81,9 +71,7 @@ Non-interactive provisioning:
 sudo env \
   SERENA_TUNNEL_ID=tunnel_... \
   PLAYWRIGHT_TUNNEL_ID=tunnel_... \
-  STITCH_TUNNEL_ID=tunnel_... \
   CONTROL_PLANE_API_KEY=... \
-  STITCH_API_KEY=... \
   ./bootstrap.sh /absolute/path/to/project
 ```
 
@@ -92,7 +80,6 @@ Linux creates:
 ```text
 mcp-serena-tunnel.service
 mcp-playwright-tunnel.service
-mcp-stitch-tunnel.service
 ```
 
 Runtime files:
@@ -100,11 +87,9 @@ Runtime files:
 ```text
 /root/.config/tunnel-client/serena.yaml
 /root/.config/tunnel-client/playwright.yaml
-/root/.config/tunnel-client/stitch.yaml
 
 /root/.config/mcp-tunnel-kit/serena.env
 /root/.config/mcp-tunnel-kit/playwright.env
-/root/.config/mcp-tunnel-kit/stitch.env
 ```
 
 When upgrading from an older release, bootstrap automatically disables and removes the legacy GitHub tunnel service, profile, secret file, and installed GitHub MCP runtime.
@@ -136,9 +121,7 @@ Non-interactive example:
 ```powershell
 $env:SERENA_TUNNEL_ID = 'tunnel_...'
 $env:PLAYWRIGHT_TUNNEL_ID = 'tunnel_...'
-$env:STITCH_TUNNEL_ID = 'tunnel_...'
 $env:CONTROL_PLANE_API_KEY = '...'
-$env:STITCH_API_KEY = '...'
 .\bootstrap.ps1 -ProjectPath 'C:\path\to\project'
 ```
 
@@ -148,12 +131,11 @@ Windows stores the runtime under:
 C:\ProgramData\McpTunnelKit
 ```
 
-and creates three Scheduled Tasks:
+and creates two Scheduled Tasks:
 
 ```text
 McpTunnelKit-Serena
 McpTunnelKit-Playwright
-McpTunnelKit-Stitch
 ```
 
 The Windows installer removes the legacy `McpTunnelKit-GitHub` task and its runtime files during upgrade.
@@ -168,20 +150,18 @@ For Playwright, Windows reuses Google Chrome Stable when available. If Chrome is
 
 ## Optional connectors
 
-Serena is always installed. Playwright and Stitch can be omitted intentionally.
+Serena is always installed. Playwright can be omitted intentionally.
 
 Linux:
 
 ```bash
 sudo ./bootstrap.sh /path/to/project --skip-playwright
-sudo ./bootstrap.sh /path/to/project --skip-stitch
 ```
 
 Windows:
 
 ```powershell
 .\bootstrap.ps1 -ProjectPath 'C:\project' -SkipPlaywright
-.\bootstrap.ps1 -ProjectPath 'C:\project' -SkipStitch
 ```
 
 ## Versions pinned by this kit
@@ -191,8 +171,6 @@ Serena               1.7.0
 OpenAI tunnel-client 0.0.14
 Node.js               24.21.0
 Playwright MCP        0.0.80
-Google Stitch SDK     0.3.5
-MCP JavaScript SDK    1.30.0
 ```
 
 Upstream archives are verified against upstream checksum files before installation.
@@ -224,18 +202,6 @@ sudo MCP_PLAYWRIGHT_HEADLESS=1 ./bootstrap.sh /absolute/path/to/project
 
 On Windows, the kit uses Google Chrome Stable. Playwright output remains under the kit runtime directory.
 
-## Stitch workflow and security
-
-Stitch is an independent connector intended for UI design review before code changes:
-
-```text
-Requirement -> Stitch design -> human review -> Serena implementation -> Playwright validation
-```
-
-The connector supports project/screen listing, asynchronous screen generation, job polling/results, and artifact pulling. Generated HTML/screenshots are written only inside the configured project workspace under `stitch-output/` by default. Artifact downloads are restricted to Google user-content hosts and capped at 20 MiB per file.
-
-`STITCH_API_KEY` exists only in the Stitch connector environment/process. Generation jobs persist in the Stitch runtime directory.
-
 ## Secret handling
 
 Profiles contain references such as:
@@ -244,11 +210,11 @@ Profiles contain references such as:
 api_key: "env:CONTROL_PLANE_API_KEY"
 ```
 
-They do not contain the actual OpenAI or Stitch keys.
+They do not contain the actual OpenAI key.
 
 Linux secret files are root-only (`0600`). Windows config/secret files get explicit ACLs for the installing user, SYSTEM, and Administrators.
 
-Do not commit real tunnel IDs, OpenAI keys, or Stitch API keys.
+Do not commit real tunnel IDs or OpenAI keys.
 
 ## Development
 
@@ -256,8 +222,8 @@ Do not commit real tunnel IDs, OpenAI keys, or Stitch API keys.
 make test
 ```
 
-CI validates Linux and Windows separately, including Python tests, ShellCheck, PowerShell parsing, JavaScript syntax, and pinned upstream assets.
+CI validates Linux and Windows separately, including Python tests, ShellCheck, PowerShell parsing, and pinned upstream assets.
 
 ## License
 
-MIT. Serena, tunnel-client, Node.js, Playwright MCP, Chromium, Google Stitch SDK, and MCP SDK retain their respective upstream licenses.
+MIT. Serena, tunnel-client, Node.js, Playwright MCP, Chromium, and MCP SDK retain their respective upstream licenses.

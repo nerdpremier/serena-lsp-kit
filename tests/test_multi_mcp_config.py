@@ -31,15 +31,6 @@ class MultiMcpConfigTests(unittest.TestCase):
                 ),
                 18092,
             ),
-            "stitch": multi.render_profile(
-                "tunnel_dddddddddddddddddddddddddddddddd",
-                multi.stitch_command(
-                    "/opt/node/bin/node",
-                    "/opt/stitch-mcp/server.mjs",
-                    Path("/workspace"),
-                ),
-                18093,
-            ),
         }
         for name, text in profiles.items():
             with self.subTest(name=name):
@@ -48,24 +39,18 @@ class MultiMcpConfigTests(unittest.TestCase):
                 self.assertNotIn("channel: playwright", text)
         self.assertIn("tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", profiles["serena"])
         self.assertIn("tunnel_cccccccccccccccccccccccccccccccc", profiles["playwright"])
-        self.assertIn("tunnel_dddddddddddddddddddddddddddddddd", profiles["stitch"])
 
     def test_secrets_are_scoped_per_connector(self) -> None:
         openai = "fixture-openai-key"
-        stitch_key = "fixture-stitch-key"
-        serena = multi.render_env("serena", openai, stitch_api_key=stitch_key)
+        serena = multi.render_env("serena", openai)
         playwright = multi.render_env(
             "playwright",
             openai,
-            stitch_api_key=stitch_key,
             browsers_path="/tmp/browsers",
         )
-        stitch = multi.render_env("stitch", openai, stitch_api_key=stitch_key)
         self.assertIn(openai, serena)
-        self.assertNotIn(stitch_key, serena)
-        self.assertNotIn(stitch_key, playwright)
+        self.assertIn(openai, playwright)
         self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/tmp/browsers", playwright)
-        self.assertIn("STITCH_API_KEY=fixture-stitch-key", stitch)
 
     def test_runtime_files_do_not_put_control_key_in_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,43 +81,6 @@ class MultiMcpConfigTests(unittest.TestCase):
             if os.name != "nt":
                 self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
-
-    def test_stitch_runtime_keeps_api_key_out_of_profile(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            profile = root / "stitch.yaml"
-            env_file = root / "stitch.env"
-            old_cp = os.environ.get("CONTROL_PLANE_API_KEY")
-            old_stitch = os.environ.get("STITCH_API_KEY")
-            try:
-                os.environ["CONTROL_PLANE_API_KEY"] = "fixture-control-key"
-                os.environ["STITCH_API_KEY"] = "fixture-stitch-key"
-                multi.create_runtime(
-                    profile,
-                    env_file,
-                    kind="stitch",
-                    tunnel_id="tunnel_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-                    command=multi.stitch_command(
-                        "/opt/node/bin/node",
-                        "/opt/stitch-mcp/server.mjs",
-                        Path("/workspace"),
-                    ),
-                    health_port=18093,
-                )
-            finally:
-                if old_cp is None:
-                    os.environ.pop("CONTROL_PLANE_API_KEY", None)
-                else:
-                    os.environ["CONTROL_PLANE_API_KEY"] = old_cp
-                if old_stitch is None:
-                    os.environ.pop("STITCH_API_KEY", None)
-                else:
-                    os.environ["STITCH_API_KEY"] = old_stitch
-            yaml = profile.read_text(encoding="utf-8")
-            env = env_file.read_text(encoding="utf-8")
-            self.assertNotIn("fixture-stitch-key", yaml)
-            self.assertIn("STITCH_API_KEY=fixture-stitch-key", env)
-            self.assertIn("127.0.0.1:18093", yaml)
 
     def test_linux_playwright_runs_browser_as_unprivileged_user(self) -> None:
         cmd = multi.playwright_command(
@@ -185,20 +133,6 @@ class MultiMcpConfigTests(unittest.TestCase):
         self.assertIn("--executable-path", cmd)
         self.assertIn("Google", cmd)
         self.assertNotIn("runuser", cmd)
-
-    def test_stitch_command_is_workspace_scoped(self) -> None:
-        cmd = multi.stitch_command(
-            r"C:\Program Files\nodejs\node.exe",
-            r"C:\ProgramData\McpTunnelKit\stitch-mcp\server.mjs",
-            Path(r"C:\Users\tester\Project Name"),
-        )
-        self.assertIn("--workspace", cmd)
-        self.assertIn("stitch-mcp", cmd)
-        self.assertIn("Project Name", cmd)
-
-    def test_stitch_requires_api_key(self) -> None:
-        with self.assertRaises(ValueError):
-            multi.render_env("stitch", "fixture-openai", stitch_api_key="")
 
     def test_github_runtime_kind_is_not_supported(self) -> None:
         with self.assertRaises(ValueError):
